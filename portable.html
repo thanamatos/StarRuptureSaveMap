@@ -320,12 +320,10 @@
     .map-container {
       flex: 1; width: 100%; min-height: 400px;
       cursor: grab; touch-action: none;
-      background: var(--dark-800);
     }
     .map-container:active { cursor: grabbing; }
     .map-container svg {
       display: block; width: 100%; height: 100%; min-height: 400px;
-      background: var(--dark-800);
     }
     .map-legend {
       width: 220px; flex-shrink: 0;
@@ -379,13 +377,9 @@
     }
     .map-legend-item .map-legend-count { color: var(--gray-500); margin-left: auto; }
     .map-toolbar {
-      display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem;
+      display: flex; gap: 0.5rem; padding: 0.5rem;
       background: var(--dark-800); border-bottom: 1px solid var(--dark-600);
-      flex-wrap: wrap;
     }
-    .map-toolbar-label { font-size: 0.75rem; color: var(--gray-500); margin-right: 0.25rem; }
-    .map-toolbar input[type="radio"] { accent-color: var(--accent-blue); cursor: pointer; }
-    .map-toolbar label:not(.map-legend-cat-toggle) { font-size: 0.75rem; color: var(--gray-400); cursor: pointer; }
     .map-toolbar button {
       padding: 0.375rem 0.75rem; font-size: 0.75rem;
       background: var(--dark-700); color: var(--gray-300);
@@ -393,66 +387,6 @@
       cursor: pointer;
     }
     .map-toolbar button:hover { background: var(--dark-600); color: var(--gray-100); }
-    .map-toolbar-sep {
-      width: 1px; height: 1.25rem; background: var(--dark-600);
-      margin: 0 0.25rem;
-    }
-    .map-bg-toggle {
-      display: inline-flex; align-items: center; gap: 0.35rem;
-      font-size: 0.75rem; color: var(--gray-400);
-    }
-    .map-bg-toggle input[type="checkbox"] {
-      cursor: pointer; accent-color: var(--accent-blue);
-    }
-    .map-bg-url {
-      width: min(28rem, 100%);
-      min-width: 14rem;
-      padding: 0.35rem 0.5rem;
-      font-size: 0.75rem;
-      background: var(--dark-700);
-      color: var(--gray-200);
-      border: 1px solid var(--dark-500);
-      border-radius: 0.25rem;
-      outline: none;
-    }
-    .map-bg-url:focus {
-      border-color: var(--accent-blue);
-      box-shadow: 0 0 0 1px var(--accent-blue);
-    }
-    .map-bg-opacity {
-      display: inline-flex; align-items: center; gap: 0.4rem;
-      font-size: 0.75rem; color: var(--gray-400);
-    }
-    .map-bg-opacity input[type="range"] {
-      width: 7rem;
-      accent-color: var(--accent-blue);
-      cursor: pointer;
-    }
-    .map-bg-adjust {
-      display: inline-flex; align-items: center; gap: 0.35rem;
-      font-size: 0.75rem; color: var(--gray-400);
-    }
-    .map-bg-adjust input {
-      width: 5rem;
-      padding: 0.25rem 0.35rem;
-      font-size: 0.75rem;
-      background: var(--dark-700);
-      color: var(--gray-200);
-      border: 1px solid var(--dark-500);
-      border-radius: 0.25rem;
-      outline: none;
-    }
-    .map-bg-adjust input:focus {
-      border-color: var(--accent-blue);
-      box-shadow: 0 0 0 1px var(--accent-blue);
-    }
-    .map-bg-status {
-      font-size: 0.6875rem;
-      color: var(--gray-500);
-    }
-    .map-bg-status.ok { color: var(--accent-green); }
-    .map-bg-status.err { color: var(--red-400); }
-    .map-legend-item-production { display: flex; align-items: center; gap: 0.5rem; font-size: 0.75rem; color: var(--gray-400); padding: 0.25rem 0; }
     .map-hover-label {
       position: absolute; pointer-events: none;
       padding: 0.35rem 0.6rem; border-radius: 0.25rem;
@@ -754,17 +688,6 @@ function hashColor(name) {
   return `hsl(${hue}, ${sat}%, ${light}%)`;
 }
 
-// Match map.html world -> map pixel conversion model
-const LEGACY_MAP_MAX_COORD = 8192;
-const LEGACY_WORLD_SCALE_X = -224700 / 5300;
-const LEGACY_WORLD_SCALE_Y = -48700 / 6750;
-function worldToLegacyMap(worldX, worldY) {
-  return {
-    x: worldX / LEGACY_WORLD_SCALE_X,
-    y: worldY / LEGACY_WORLD_SCALE_Y
-  };
-}
-
 // ===== State =====
 let analysisData = null;
 let activeTab = 'buildings';
@@ -789,14 +712,6 @@ let mapTranslateY = 0;
 let mapDragStart = null;
 const MAP_DEFAULT_VISIBLE_CATEGORY = 'Crafting';
 let mapBuildingVisibility = {};
-let mapViewMode = 'buildings';
-let mapBackgroundEnabled = true;
-let mapBackgroundUrl = 'https://gamemappers.com/wp-content/uploads/tm7hrn.jpg';
-let mapBackgroundOpacity = 0.55;
-let mapBackgroundStatus = '';
-let mapBackgroundScale = 1;
-let mapBackgroundOffsetX = 0;
-let mapBackgroundOffsetY = 0;
 
 // ===== DOM Helpers =====
 const $ = (sel) => document.querySelector(sel);
@@ -1010,25 +925,12 @@ function extractDisplayName(entityValue, spawnData) {
   return null;
 }
 
-// Extract scale or size from spawnData (Unreal may use Scale, Scale3D, transform.Scale, or Bounds)
+// Extract scale from spawnData (Unreal may use Scale, Scale3D, or transform.Scale)
 function extractScale(spawnData) {
   if (!spawnData || typeof spawnData !== 'object') return null;
   function getVec(obj) {
-    if (obj == null) return null;
+    if (!obj || typeof obj !== 'object') return null;
     const parse = (v) => (typeof v === 'number' && !Number.isNaN(v)) ? v : (typeof v === 'string' ? Number(v) : NaN);
-    if (typeof obj === 'number') {
-      const s = parse(obj);
-      if (Number.isNaN(s) || s <= 0) return null;
-      return { x: s, y: s, z: s };
-    }
-    if (Array.isArray(obj) && obj.length >= 2) {
-      const x = parse(obj[0]);
-      const y = parse(obj[1]);
-      const z = obj.length >= 3 ? parse(obj[2]) : (Number.isNaN(x) ? NaN : x);
-      if (Number.isNaN(x) && Number.isNaN(y) && Number.isNaN(z)) return null;
-      return { x: Number.isNaN(x) ? 1 : x, y: Number.isNaN(y) ? 1 : y, z: Number.isNaN(z) ? 1 : z };
-    }
-    if (typeof obj !== 'object') return null;
     const x = parse(obj.x ?? obj.X);
     const y = parse(obj.y ?? obj.Y);
     const z = parse(obj.z ?? obj.Z);
@@ -1038,20 +940,12 @@ function extractScale(spawnData) {
     const sz = Number.isNaN(z) ? 1 : z;
     return { x: sx, y: sy, z: sz };
   }
-  const scale = getVec(spawnData.scale) ?? getVec(spawnData.Scale) ?? getVec(spawnData.scale3D) ?? getVec(spawnData.Scale3D)
-    ?? getVec(spawnData.relativeScale) ?? getVec(spawnData.RelativeScale) ?? getVec(spawnData.drawScale) ?? getVec(spawnData.DrawScale)
-    ?? getVec(spawnData.drawScale3D) ?? getVec(spawnData.DrawScale3D);
+  const scale = getVec(spawnData.scale) ?? getVec(spawnData.Scale) ?? getVec(spawnData.scale3D) ?? getVec(spawnData.Scale3D);
   if (scale) return scale;
   const trans = spawnData.transform ?? spawnData.Transform;
   if (trans && typeof trans === 'object') {
     const transScale = getVec(trans.scale ?? trans.Scale ?? trans.scale3D ?? trans.Scale3D);
     if (transScale) return transScale;
-  }
-  // Bounds: BoxExtent or extent gives half-size; use 2*extent as scale proxy for map size
-  const bounds = spawnData.bounds ?? spawnData.Bounds ?? spawnData.boundingBox ?? spawnData.BoundingBox;
-  if (bounds && typeof bounds === 'object') {
-    const ext = getVec(bounds.boxExtent ?? bounds.BoxExtent ?? bounds.extent ?? bounds.Extent ?? bounds.halfSize ?? bounds.HalfSize);
-    if (ext && (ext.x > 0 || ext.y > 0 || ext.z > 0)) return { x: ext.x * 2, y: ext.y * 2, z: ext.z * 2 };
   }
   return null;
 }
@@ -1098,25 +992,11 @@ function analyze(jsonContent) {
   const production = new Map();
   const storage = new Map();
   const buildingPositions = [];
-  let spawnDataKeysLogged = 0;
 
   for (const [entityIdKey, entityValue] of Object.entries(entities)) {
     if (!entityValue) continue;
     let spawnData;
     try { spawnData = getJsonItems(entityValue, 'spawnData'); } catch { continue; }
-    if (typeof spawnData === 'string') {
-      try { spawnData = JSON.parse(spawnData); } catch { continue; }
-    }
-    if (spawnDataKeysLogged < 2 && spawnData && typeof spawnData === 'object') {
-      const keys = Object.keys(spawnData);
-      const transform = spawnData.transform ?? spawnData.Transform;
-      const transformKeys = transform && typeof transform === 'object' ? Object.keys(transform) : [];
-      console.log('[Save map] spawnData keys (sample):', keys);
-      if (transformKeys.length) console.log('[Save map] spawnData.transform keys:', transformKeys);
-      const bounds = spawnData.bounds ?? spawnData.Bounds;
-      if (bounds && typeof bounds === 'object') console.log('[Save map] spawnData.bounds keys:', Object.keys(bounds));
-      spawnDataKeysLogged++;
-    }
 
     const entityConfigDataPath = String(spawnData['entityConfigDataPath'] || '');
     const buildingDef = buildingsByInternal.get(entityConfigDataPath);
@@ -1129,7 +1009,6 @@ function analyze(jsonContent) {
     const fragmentValues = entityValue['fragmentValues'];
 
     if (pos) {
-      const mapped = worldToLegacyMap(pos.x, pos.y);
       const scaleVec = extractScale(spawnData);
       const scaleX = scaleVec ? scaleVec.x : 1;
       const scaleY = scaleVec ? scaleVec.y : 1;
@@ -1140,7 +1019,6 @@ function analyze(jsonContent) {
       }
       if (!displayName) displayName = extractDisplayName(entityValue, spawnData);
       let producedItem = null;
-      let perMinute = 0;
       if (!buildingDef.IsStorage && Array.isArray(fragmentValues)) {
         for (const fragmentValue of fragmentValues) {
           const f = String(fragmentValue);
@@ -1153,8 +1031,6 @@ function analyze(jsonContent) {
             const parenIdx = itemName.indexOf('(');
             if (parenIdx > 0) itemName = itemName.substring(0, parenIdx).trim();
             producedItem = itemName;
-            perMinute = itemDef.AmountProduced > 0 && itemDef.Seconds > 0
-              ? itemDef.AmountProduced * (60 / itemDef.Seconds) : 0;
             break;
           }
         }
@@ -1163,11 +1039,9 @@ function analyze(jsonContent) {
         name: buildingDef.Name,
         category,
         x: pos.x, y: pos.y, z: pos.z,
-        mapX: mapped.x, mapY: mapped.y,
         scaleX, scaleY,
         displayName: displayName || undefined,
-        producedItem: producedItem || undefined,
-        perMinute: perMinute || undefined
+        producedItem: producedItem || undefined
       });
     }
 
@@ -1195,19 +1069,6 @@ function analyze(jsonContent) {
           }
         }
       }
-    }
-  }
-
-  // Normalize scale so bounds-based sizes (world units) don't all hit max clamp
-  let maxS = 0;
-  for (const p of buildingPositions) {
-    const s = Math.max(p.scaleX ?? 1, p.scaleY ?? 1);
-    if (s > maxS) maxS = s;
-  }
-  if (maxS > 2) {
-    for (const p of buildingPositions) {
-      p.scaleX = (p.scaleX ?? 1) / (maxS / 2);
-      p.scaleY = (p.scaleY ?? 1) / (maxS / 2);
     }
   }
 
@@ -1647,65 +1508,24 @@ function renderMapTab(container) {
     return;
   }
 
-  // Use map.html conversion model so map backgrounds can align correctly.
-  const points = positions.map(p => {
-    const mapped = worldToLegacyMap(p.x, p.y);
-    const px = mapped.x;
-    const py = mapped.y;
-    return { ...p, plotX: px, plotY: py };
-  });
-  const xs = points.map(p => p.plotX).filter(Number.isFinite);
-  const ys = points.map(p => p.plotY).filter(Number.isFinite);
-  if (xs.length === 0 || ys.length === 0) {
-    container.appendChild(h('div', { className: 'empty-msg' }, 'No usable map coordinates in this save.'));
-    return;
-  }
-  const usingFixedMapSpace = !!mapBackgroundEnabled;
-  const vbMinX = usingFixedMapSpace ? 0 : Math.min(...xs) - 50;
-  const vbMinY = usingFixedMapSpace ? 0 : Math.min(...ys) - 50;
-  const vbW = usingFixedMapSpace ? LEGACY_MAP_MAX_COORD : (Math.max(...xs) - Math.min(...xs) + 100 || 100);
-  const vbH = usingFixedMapSpace ? LEGACY_MAP_MAX_COORD : (Math.max(...ys) - Math.min(...ys) + 100 || 100);
-  function applyBackgroundCalibration() {
-    const bgCalib = document.getElementById('mapBackgroundCalib');
-    if (!bgCalib) return;
-    bgCalib.setAttribute(
-      'transform',
-      `translate(${mapBackgroundOffsetX},${mapBackgroundOffsetY}) scale(${mapBackgroundScale})`
-    );
-  }
+  const xs = positions.map(p => p.x);
+  const ys = positions.map(p => p.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const rangeX = maxX - minX || 100;
+  const rangeY = maxY - minY || 100;
+  const pad = Math.max(rangeX, rangeY) * 0.05 || 50;
+  const vbMinX = minX - pad;
+  const vbMinY = minY - pad;
+  const vbW = rangeX + pad * 2;
+  const vbH = rangeY + pad * 2;
 
   const layout = h('div', { className: 'map-layout' });
 
   const wrapper = h('div', { className: 'map-wrapper' });
   const toolbar = h('div', { className: 'map-toolbar' });
-  const viewModeLabel = document.createElement('span');
-  viewModeLabel.className = 'map-toolbar-label';
-  viewModeLabel.textContent = 'View:';
-  toolbar.appendChild(viewModeLabel);
-  const buildingsRadio = document.createElement('input');
-  buildingsRadio.type = 'radio';
-  buildingsRadio.name = 'mapViewMode';
-  buildingsRadio.id = 'mapModeBuildings';
-  buildingsRadio.value = 'buildings';
-  buildingsRadio.checked = mapViewMode === 'buildings';
-  buildingsRadio.addEventListener('change', () => { mapViewMode = 'buildings'; renderTabContent(); });
-  const buildingsLabel = document.createElement('label');
-  buildingsLabel.htmlFor = 'mapModeBuildings';
-  buildingsLabel.textContent = 'Buildings';
-  toolbar.appendChild(buildingsRadio);
-  toolbar.appendChild(buildingsLabel);
-  const productionRadio = document.createElement('input');
-  productionRadio.type = 'radio';
-  productionRadio.name = 'mapViewMode';
-  productionRadio.id = 'mapModeProduction';
-  productionRadio.value = 'production';
-  productionRadio.checked = mapViewMode === 'production';
-  productionRadio.addEventListener('change', () => { mapViewMode = 'production'; renderTabContent(); });
-  const productionLabel = document.createElement('label');
-  productionLabel.htmlFor = 'mapModeProduction';
-  productionLabel.textContent = 'Production';
-  toolbar.appendChild(productionRadio);
-  toolbar.appendChild(productionLabel);
   const resetBtn = document.createElement('button');
   resetBtn.textContent = 'Reset view';
   resetBtn.addEventListener('click', () => {
@@ -1715,277 +1535,24 @@ function renderMapTab(container) {
     renderTabContent();
   });
   toolbar.appendChild(resetBtn);
-
-  toolbar.appendChild(h('div', { className: 'map-toolbar-sep' }));
-
-  const bgToggle = document.createElement('label');
-  bgToggle.className = 'map-bg-toggle';
-  const bgToggleInput = document.createElement('input');
-  bgToggleInput.type = 'checkbox';
-  bgToggleInput.checked = mapBackgroundEnabled;
-  bgToggleInput.addEventListener('change', () => {
-    mapBackgroundEnabled = bgToggleInput.checked;
-    renderTabContent();
-  });
-  bgToggle.appendChild(bgToggleInput);
-  bgToggle.appendChild(document.createTextNode('Background'));
-  toolbar.appendChild(bgToggle);
-
-  const bgUrlInput = document.createElement('input');
-  bgUrlInput.type = 'text';
-  bgUrlInput.className = 'map-bg-url';
-  bgUrlInput.placeholder = 'Background image URL or local path';
-  bgUrlInput.value = mapBackgroundUrl;
-  bgUrlInput.title = 'Paste an image URL or local file path to use as map background';
-  toolbar.appendChild(bgUrlInput);
-
-  const applyBgBtn = document.createElement('button');
-  applyBgBtn.textContent = 'Apply';
-  applyBgBtn.addEventListener('click', () => {
-    mapBackgroundUrl = bgUrlInput.value.trim();
-    mapBackgroundStatus = '';
-    renderTabContent();
-  });
-  toolbar.appendChild(applyBgBtn);
-
-  const presetBgBtn = document.createElement('button');
-  presetBgBtn.textContent = 'Try SR Preset';
-  presetBgBtn.title = 'Try known StarRupture map background URLs';
-  presetBgBtn.addEventListener('click', () => {
-    const candidates = [
-      'https://gamemappers.com/wp-content/uploads/tm7hrn.jpg',
-      'https://starrupture.tools/images/map.webp',
-      'https://starrupture.tools/images/map.png',
-      'https://starrupture.tools/map.webp',
-      'https://starrupture.tools/map.png'
-    ];
-    mapBackgroundStatus = 'Trying StarRupture presets...';
-    renderTabContent();
-    const tryIndex = (idx) => {
-      if (idx >= candidates.length) {
-        mapBackgroundStatus = 'Could not load StarRupture preset image';
-        renderTabContent();
-        return;
-      }
-      const testImg = new Image();
-      testImg.onload = () => {
-        mapBackgroundUrl = candidates[idx];
-        mapBackgroundEnabled = true;
-        mapBackgroundStatus = 'Loaded StarRupture preset';
-        renderTabContent();
-      };
-      testImg.onerror = () => tryIndex(idx + 1);
-      testImg.src = candidates[idx];
-    };
-    tryIndex(0);
-  });
-  toolbar.appendChild(presetBgBtn);
-
-  bgUrlInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      applyBgBtn.click();
-    }
-  });
-
-  const bgFileInput = document.createElement('input');
-  bgFileInput.type = 'file';
-  bgFileInput.accept = 'image/*';
-  bgFileInput.style.display = 'none';
-  bgFileInput.addEventListener('change', () => {
-    const file = bgFileInput.files && bgFileInput.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      mapBackgroundUrl = String(reader.result || '');
-      mapBackgroundEnabled = true;
-      mapBackgroundStatus = `Loaded ${file.name}`;
-      renderTabContent();
-    };
-    reader.onerror = () => {
-      mapBackgroundStatus = 'Failed to load selected image file';
-      renderTabContent();
-    };
-    reader.readAsDataURL(file);
-  });
-  const fileBtn = document.createElement('button');
-  fileBtn.textContent = 'Load Image';
-  fileBtn.addEventListener('click', () => bgFileInput.click());
-  toolbar.appendChild(fileBtn);
-  toolbar.appendChild(bgFileInput);
-
-  const bgOpacityWrap = document.createElement('label');
-  bgOpacityWrap.className = 'map-bg-opacity';
-  bgOpacityWrap.appendChild(document.createTextNode('Opacity'));
-  const bgOpacityInput = document.createElement('input');
-  bgOpacityInput.type = 'range';
-  bgOpacityInput.min = '5';
-  bgOpacityInput.max = '100';
-  bgOpacityInput.step = '1';
-  bgOpacityInput.value = String(Math.round(mapBackgroundOpacity * 100));
-  bgOpacityInput.addEventListener('input', () => {
-    mapBackgroundOpacity = Math.max(0.05, Math.min(1, Number(bgOpacityInput.value) / 100));
-    const imageEl = document.getElementById('mapBackgroundImage');
-    if (imageEl) imageEl.setAttribute('opacity', String(mapBackgroundOpacity));
-  });
-  bgOpacityWrap.appendChild(bgOpacityInput);
-  toolbar.appendChild(bgOpacityWrap);
-
-  const bgScaleWrap = document.createElement('label');
-  bgScaleWrap.className = 'map-bg-adjust';
-  bgScaleWrap.appendChild(document.createTextNode('Scale'));
-  const bgScaleInput = document.createElement('input');
-  bgScaleInput.type = 'number';
-  bgScaleInput.step = '0.01';
-  bgScaleInput.min = '0.1';
-  bgScaleInput.max = '10';
-  bgScaleInput.value = String(mapBackgroundScale);
-  bgScaleInput.addEventListener('input', () => {
-    const n = Number(bgScaleInput.value);
-    if (!Number.isFinite(n) || n <= 0) return;
-    mapBackgroundScale = Math.max(0.1, Math.min(10, n));
-    applyBackgroundCalibration();
-  });
-  bgScaleWrap.appendChild(bgScaleInput);
-  toolbar.appendChild(bgScaleWrap);
-
-  const bgOffsetXWrap = document.createElement('label');
-  bgOffsetXWrap.className = 'map-bg-adjust';
-  bgOffsetXWrap.appendChild(document.createTextNode('X'));
-  const bgOffsetXInput = document.createElement('input');
-  bgOffsetXInput.type = 'number';
-  bgOffsetXInput.step = '10';
-  bgOffsetXInput.value = String(mapBackgroundOffsetX);
-  bgOffsetXInput.addEventListener('input', () => {
-    const n = Number(bgOffsetXInput.value);
-    if (!Number.isFinite(n)) return;
-    mapBackgroundOffsetX = n;
-    applyBackgroundCalibration();
-  });
-  bgOffsetXWrap.appendChild(bgOffsetXInput);
-  toolbar.appendChild(bgOffsetXWrap);
-
-  const bgOffsetYWrap = document.createElement('label');
-  bgOffsetYWrap.className = 'map-bg-adjust';
-  bgOffsetYWrap.appendChild(document.createTextNode('Y'));
-  const bgOffsetYInput = document.createElement('input');
-  bgOffsetYInput.type = 'number';
-  bgOffsetYInput.step = '10';
-  bgOffsetYInput.value = String(mapBackgroundOffsetY);
-  bgOffsetYInput.addEventListener('input', () => {
-    const n = Number(bgOffsetYInput.value);
-    if (!Number.isFinite(n)) return;
-    mapBackgroundOffsetY = n;
-    applyBackgroundCalibration();
-  });
-  bgOffsetYWrap.appendChild(bgOffsetYInput);
-  toolbar.appendChild(bgOffsetYWrap);
-
-  const bgCalibResetBtn = document.createElement('button');
-  bgCalibResetBtn.textContent = 'Reset BG Align';
-  bgCalibResetBtn.title = 'Reset background scale and offsets';
-  bgCalibResetBtn.addEventListener('click', () => {
-    mapBackgroundScale = 1;
-    mapBackgroundOffsetX = 0;
-    mapBackgroundOffsetY = 0;
-    bgScaleInput.value = '1';
-    bgOffsetXInput.value = '0';
-    bgOffsetYInput.value = '0';
-    applyBackgroundCalibration();
-  });
-  toolbar.appendChild(bgCalibResetBtn);
-
-  const bgStatus = document.createElement('span');
-  bgStatus.className = 'map-bg-status';
-  if (mapBackgroundStatus) {
-    const isErr = mapBackgroundStatus.toLowerCase().includes('fail');
-    bgStatus.classList.add(isErr ? 'err' : 'ok');
-    bgStatus.textContent = mapBackgroundStatus;
-  } else if (mapBackgroundEnabled && mapBackgroundUrl) {
-    bgStatus.textContent = 'Background enabled';
-  } else {
-    bgStatus.textContent = 'No background image set';
-  }
-  toolbar.appendChild(bgStatus);
   wrapper.appendChild(toolbar);
-
-  const productionGroups = [];
-  const prodMap = new Map();
-  points.forEach(p => {
-    if (!p.producedItem || !(p.perMinute > 0)) return;
-    const key = p.producedItem;
-    if (!prodMap.has(key)) {
-      prodMap.set(key, { itemName: key, totalPerMinute: 0, sumX: 0, sumY: 0, count: 0 });
-    }
-    const g = prodMap.get(key);
-    g.totalPerMinute += p.perMinute;
-    g.sumX += p.plotX;
-    g.sumY += p.plotY;
-    g.count += 1;
-  });
-  prodMap.forEach((g) => {
-    productionGroups.push({
-      itemName: g.itemName,
-      totalPerMinute: g.totalPerMinute,
-      cx: g.sumX / g.count,
-      cy: g.sumY / g.count,
-      count: g.count
-    });
-  });
-  productionGroups.sort((a, b) => b.totalPerMinute - a.totalPerMinute);
 
   const mapDiv = h('div', { className: 'map-container', id: 'mapContainer' });
   const svgNs = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(svgNs, 'svg');
   svg.setAttribute('viewBox', `${vbMinX} ${vbMinY} ${vbW} ${vbH}`);
   svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-  const bgRect = document.createElementNS(svgNs, 'rect');
-  bgRect.setAttribute('x', vbMinX);
-  bgRect.setAttribute('y', vbMinY);
-  bgRect.setAttribute('width', vbW);
-  bgRect.setAttribute('height', vbH);
-  bgRect.setAttribute('fill', '#13132b');
-  svg.appendChild(bgRect);
 
   const g = document.createElementNS(svgNs, 'g');
   g.id = 'mapPanZoom';
   g.setAttribute('transform', `translate(${mapTranslateX},${mapTranslateY}) scale(${mapScale})`);
-  if (mapBackgroundEnabled && mapBackgroundUrl) {
-    const bgCalib = document.createElementNS(svgNs, 'g');
-    bgCalib.id = 'mapBackgroundCalib';
-    bgCalib.setAttribute(
-      'transform',
-      `translate(${mapBackgroundOffsetX},${mapBackgroundOffsetY}) scale(${mapBackgroundScale})`
-    );
-    const mapBgImage = document.createElementNS(svgNs, 'image');
-    mapBgImage.id = 'mapBackgroundImage';
-    mapBgImage.setAttribute('x', vbMinX);
-    mapBgImage.setAttribute('y', vbMinY);
-    mapBgImage.setAttribute('width', vbW);
-    mapBgImage.setAttribute('height', vbH);
-    mapBgImage.setAttribute('preserveAspectRatio', 'none');
-    mapBgImage.setAttribute('opacity', String(mapBackgroundOpacity));
-    mapBgImage.setAttribute('href', mapBackgroundUrl);
-    mapBgImage.addEventListener('load', () => {
-      mapBackgroundStatus = 'Background loaded';
-      bgStatus.className = 'map-bg-status ok';
-      bgStatus.textContent = mapBackgroundStatus;
-    });
-    mapBgImage.addEventListener('error', () => {
-      mapBackgroundStatus = 'Failed to load background image';
-      bgStatus.className = 'map-bg-status err';
-      bgStatus.textContent = mapBackgroundStatus;
-    });
-    bgCalib.appendChild(mapBgImage);
-    g.appendChild(bgCalib);
-  }
 
   const byName = {};
-  points.forEach(p => {
+  positions.forEach(p => {
     byName[p.name] = (byName[p.name] || 0) + 1;
   });
   // Initialize visibility: by default only Crafting is enabled
-  points.forEach(p => {
+  positions.forEach(p => {
     if (mapBuildingVisibility[p.name] === undefined) {
       mapBuildingVisibility[p.name] = (p.category === MAP_DEFAULT_VISIBLE_CATEGORY);
     }
@@ -1994,62 +1561,30 @@ function renderMapTab(container) {
   const baseSize = mapSpan * 0.0012;
   const minSize = Math.max(1, baseSize * 0.3);
   const maxSize = mapSpan * 0.012;
-  const baseSizeProd = mapSpan * 0.008;
-  const buildingRects = [];
-  const productionHoverTargets = [];
   function setRectVisibility(grp, visibilityMap) {
     for (let i = 0; i < grp.children.length; i++) {
       const rect = grp.children[i];
       const name = rect.getAttribute('data-name');
-      if (name != null) rect.style.display = visibilityMap[name] !== false ? '' : 'none';
+      rect.style.display = visibilityMap[name] !== false ? '' : 'none';
     }
   }
-  if (mapViewMode === 'buildings') {
-    points.forEach(p => {
-      const rect = document.createElementNS(svgNs, 'rect');
-      const w = Math.max(minSize, Math.min(maxSize, baseSize * (p.scaleX ?? 1)));
-      const h = Math.max(minSize, Math.min(maxSize, baseSize * (p.scaleY ?? 1)));
-      rect.setAttribute('x', p.plotX - w / 2);
-      rect.setAttribute('y', p.plotY - h / 2);
-      rect.setAttribute('width', w);
-      rect.setAttribute('height', h);
-      rect.setAttribute('fill', hashColor(p.name));
-      rect.setAttribute('stroke', 'rgba(0,0,0,0.5)');
-      rect.setAttribute('stroke-width', '0.5');
-      rect.setAttribute('data-name', p.name);
-      rect.setAttribute('data-category', p.category);
-      rect.style.cursor = 'pointer';
-      rect.style.display = mapBuildingVisibility[p.name] !== false ? '' : 'none';
-      g.appendChild(rect);
-      buildingRects.push(rect);
-    });
-  } else {
-    productionGroups.forEach((grp) => {
-      const sizeFactor = Math.min(4, Math.max(0.8, Math.sqrt(grp.totalPerMinute) / 4));
-      const side = baseSizeProd * sizeFactor;
-      const rect = document.createElementNS(svgNs, 'rect');
-      rect.setAttribute('x', grp.cx - side / 2);
-      rect.setAttribute('y', grp.cy - side / 2);
-      rect.setAttribute('width', side);
-      rect.setAttribute('height', side);
-      rect.setAttribute('fill', hashColor(grp.itemName));
-      rect.setAttribute('stroke', 'rgba(0,0,0,0.6)');
-      rect.setAttribute('stroke-width', '1');
-      rect.setAttribute('data-item', grp.itemName);
-      rect.style.cursor = 'pointer';
-      g.appendChild(rect);
-      const text = document.createElementNS(svgNs, 'text');
-      text.setAttribute('x', grp.cx);
-      text.setAttribute('y', grp.cy);
-      text.setAttribute('text-anchor', 'middle');
-      text.setAttribute('dominant-baseline', 'middle');
-      text.setAttribute('font-size', Math.max(2, Math.min(side * 0.35, mapSpan * 0.008)));
-      text.setAttribute('fill', 'rgba(0,0,0,0.9)');
-      text.textContent = `${grp.itemName} · ${grp.totalPerMinute.toFixed(1)}/min`;
-      g.appendChild(text);
-      productionHoverTargets.push({ grp, rect, text });
-    });
-  }
+  positions.forEach(p => {
+    const rect = document.createElementNS(svgNs, 'rect');
+    const w = Math.max(minSize, Math.min(maxSize, baseSize * (p.scaleX ?? 1)));
+    const h = Math.max(minSize, Math.min(maxSize, baseSize * (p.scaleY ?? 1)));
+    rect.setAttribute('x', p.x - w / 2);
+    rect.setAttribute('y', p.y - h / 2);
+    rect.setAttribute('width', w);
+    rect.setAttribute('height', h);
+    rect.setAttribute('fill', hashColor(p.name));
+    rect.setAttribute('stroke', 'rgba(0,0,0,0.5)');
+    rect.setAttribute('stroke-width', '0.5');
+    rect.setAttribute('data-name', p.name);
+    rect.setAttribute('data-category', p.category);
+    rect.style.cursor = 'pointer';
+    rect.style.display = mapBuildingVisibility[p.name] !== false ? '' : 'none';
+    g.appendChild(rect);
+  });
   svg.appendChild(g);
   mapDiv.appendChild(svg);
 
@@ -2060,25 +1595,19 @@ function renderMapTab(container) {
   const hoverLabelCat = hoverLabel.querySelector('.map-hover-label-cat');
   const hoverLabelProduces = hoverLabel.querySelector('.map-hover-label-produces');
   const labelOffset = 12;
-  function showHoverLabel(name, category, clientX, clientY, displayName, producedItem, productionRate) {
-    if (productionRate != null) {
-      hoverLabelName.textContent = name;
-      hoverLabelCat.textContent = `${productionRate.toFixed(1)} / min`;
-      hoverLabelProduces.style.display = 'none';
+  function showHoverLabel(name, category, clientX, clientY, displayName, producedItem) {
+    if (displayName && displayName !== name) {
+      hoverLabelName.textContent = displayName;
+      hoverLabelCat.textContent = `${name} · ${category}`;
     } else {
-      if (displayName && displayName !== name) {
-        hoverLabelName.textContent = displayName;
-        hoverLabelCat.textContent = `${name} · ${category}`;
-      } else {
-        hoverLabelName.textContent = name;
-        hoverLabelCat.textContent = category;
-      }
-      if (producedItem) {
-        hoverLabelProduces.textContent = `Producing: ${producedItem}`;
-        hoverLabelProduces.style.display = '';
-      } else {
-        hoverLabelProduces.style.display = 'none';
-      }
+      hoverLabelName.textContent = name;
+      hoverLabelCat.textContent = category;
+    }
+    if (producedItem) {
+      hoverLabelProduces.textContent = `Producing: ${producedItem}`;
+      hoverLabelProduces.style.display = '';
+    } else {
+      hoverLabelProduces.style.display = 'none';
     }
     hoverLabel.classList.add('visible');
     positionHoverLabel(clientX, clientY);
@@ -2097,30 +1626,16 @@ function renderMapTab(container) {
   function hideHoverLabel() {
     hoverLabel.classList.remove('visible');
   }
-  if (mapViewMode === 'buildings') {
-    points.forEach((p, i) => {
-      const rect = buildingRects[i];
-      if (!rect) return;
-      rect.addEventListener('mouseenter', (e) => {
-        showHoverLabel(p.name, p.category, e.clientX, e.clientY, p.displayName, p.producedItem, null);
-      });
-      rect.addEventListener('mousemove', (e) => {
-        positionHoverLabel(e.clientX, e.clientY);
-      });
-      rect.addEventListener('mouseleave', hideHoverLabel);
+  positions.forEach((p, i) => {
+    const rect = g.children[i];
+    rect.addEventListener('mouseenter', (e) => {
+      showHoverLabel(p.name, p.category, e.clientX, e.clientY, p.displayName, p.producedItem);
     });
-  } else {
-    productionHoverTargets.forEach(({ grp, rect, text: textEl }) => {
-      function showProdHover(e) {
-        showHoverLabel(grp.itemName, '', e.clientX, e.clientY, null, null, grp.totalPerMinute);
-      }
-      [rect, textEl].forEach((el) => {
-        el.addEventListener('mouseenter', showProdHover);
-        el.addEventListener('mousemove', (e) => positionHoverLabel(e.clientX, e.clientY));
-        el.addEventListener('mouseleave', hideHoverLabel);
-      });
+    rect.addEventListener('mousemove', (e) => {
+      positionHoverLabel(e.clientX, e.clientY);
     });
-  }
+    rect.addEventListener('mouseleave', hideHoverLabel);
+  });
   mapDiv.addEventListener('mousemove', (e) => {
     if (hoverLabel.classList.contains('visible')) positionHoverLabel(e.clientX, e.clientY);
   });
@@ -2178,118 +1693,96 @@ function renderMapTab(container) {
   }, { passive: false });
 
   const legend = h('div', { className: 'map-legend' });
-  if (mapViewMode === 'production') {
-    const legendTitle = document.createElement('h3');
-    legendTitle.textContent = 'Production groups';
-    legend.appendChild(legendTitle);
-    productionGroups.forEach((grp) => {
-      const item = document.createElement('div');
-      item.className = 'map-legend-item map-legend-item-production';
+  const legendHeader = document.createElement('div');
+  legendHeader.className = 'map-legend-header';
+  const legendTitle = document.createElement('h3');
+  legendTitle.textContent = 'Show on map';
+  legendHeader.appendChild(legendTitle);
+  const allBtn = document.createElement('button');
+  allBtn.className = 'map-legend-toggle';
+  allBtn.textContent = 'All';
+  allBtn.title = 'Show all building types';
+  const noneBtn = document.createElement('button');
+  noneBtn.className = 'map-legend-toggle';
+  noneBtn.textContent = 'None';
+  noneBtn.title = 'Hide all building types';
+  legendHeader.appendChild(allBtn);
+  legendHeader.appendChild(noneBtn);
+  legend.appendChild(legendHeader);
+  const byCategory = {};
+  positions.forEach(p => {
+    if (!byCategory[p.category]) byCategory[p.category] = [];
+    byCategory[p.category].push(p);
+  });
+  const catOrder = [...new Set(positions.map(p => p.category))].sort();
+  function updateCategoryCheckbox(catCheckbox, catDiv) {
+    const itemCheckboxes = catDiv.querySelectorAll('.map-legend-item-toggle input[type="checkbox"]');
+    const checked = [...itemCheckboxes].filter(cb => cb.checked).length;
+    catCheckbox.checked = checked === itemCheckboxes.length;
+    catCheckbox.indeterminate = checked > 0 && checked < itemCheckboxes.length;
+  }
+  catOrder.forEach(cat => {
+    const catDiv = document.createElement('div');
+    catDiv.className = 'map-legend-cat';
+    const list = byCategory[cat];
+    const names = [...new Set(list.map(p => p.name))].sort();
+    const catTitleRow = document.createElement('label');
+    catTitleRow.className = 'map-legend-cat-title map-legend-cat-toggle';
+    const catCheckbox = document.createElement('input');
+    catCheckbox.type = 'checkbox';
+    catCheckbox.checked = names.every(name => mapBuildingVisibility[name] !== false);
+    catCheckbox.indeterminate = names.some(name => mapBuildingVisibility[name]) && !catCheckbox.checked;
+    catCheckbox.addEventListener('change', () => {
+      const on = catCheckbox.checked;
+      list.forEach(p => { mapBuildingVisibility[p.name] = on; });
+      catDiv.querySelectorAll('.map-legend-item-toggle input[type="checkbox"]').forEach(cb => { cb.checked = on; });
+      catCheckbox.indeterminate = false;
+      setRectVisibility(g, mapBuildingVisibility);
+    });
+    const catTitleText = document.createElement('span');
+    catTitleText.textContent = cat;
+    catTitleRow.appendChild(catCheckbox);
+    catTitleRow.appendChild(catTitleText);
+    catDiv.appendChild(catTitleRow);
+    names.forEach(name => {
+      const count = list.filter(p => p.name === name).length;
+      const color = hashColor(name);
+      const item = document.createElement('label');
+      item.className = 'map-legend-item map-legend-item-toggle';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = mapBuildingVisibility[name] !== false;
+      checkbox.addEventListener('change', () => {
+        mapBuildingVisibility[name] = checkbox.checked;
+        setRectVisibility(g, mapBuildingVisibility);
+        updateCategoryCheckbox(catCheckbox, catDiv);
+      });
       const dot = document.createElement('span');
       dot.className = 'map-legend-dot';
-      dot.style.background = hashColor(grp.itemName);
+      dot.style.background = color;
       const label = document.createElement('span');
-      label.textContent = grp.itemName;
-      const rateSpan = document.createElement('span');
-      rateSpan.className = 'map-legend-count';
-      rateSpan.textContent = `${grp.totalPerMinute.toFixed(1)} / min`;
+      label.textContent = name;
+      const countSpan = document.createElement('span');
+      countSpan.className = 'map-legend-count';
+      countSpan.textContent = String(count);
+      item.appendChild(checkbox);
       item.appendChild(dot);
       item.appendChild(label);
-      item.appendChild(rateSpan);
-      legend.appendChild(item);
+      item.appendChild(countSpan);
+      catDiv.appendChild(item);
     });
-  } else {
-    const legendHeader = document.createElement('div');
-    legendHeader.className = 'map-legend-header';
-    const legendTitle = document.createElement('h3');
-    legendTitle.textContent = 'Show on map';
-    legendHeader.appendChild(legendTitle);
-    const allBtn = document.createElement('button');
-    allBtn.className = 'map-legend-toggle';
-    allBtn.textContent = 'All';
-    allBtn.title = 'Show all building types';
-    const noneBtn = document.createElement('button');
-    noneBtn.className = 'map-legend-toggle';
-    noneBtn.textContent = 'None';
-    noneBtn.title = 'Hide all building types';
-    legendHeader.appendChild(allBtn);
-    legendHeader.appendChild(noneBtn);
-    legend.appendChild(legendHeader);
-    const byCategory = {};
-    positions.forEach(p => {
-      if (!byCategory[p.category]) byCategory[p.category] = [];
-      byCategory[p.category].push(p);
-    });
-    const catOrder = [...new Set(positions.map(p => p.category))].sort();
-    function updateCategoryCheckbox(catCheckbox, catDiv) {
-      const itemCheckboxes = catDiv.querySelectorAll('.map-legend-item-toggle input[type="checkbox"]');
-      const checked = [...itemCheckboxes].filter(cb => cb.checked).length;
-      catCheckbox.checked = checked === itemCheckboxes.length;
-      catCheckbox.indeterminate = checked > 0 && checked < itemCheckboxes.length;
-    }
-    catOrder.forEach(cat => {
-      const catDiv = document.createElement('div');
-      catDiv.className = 'map-legend-cat';
-      const list = byCategory[cat];
-      const names = [...new Set(list.map(p => p.name))].sort();
-      const catTitleRow = document.createElement('label');
-      catTitleRow.className = 'map-legend-cat-title map-legend-cat-toggle';
-      const catCheckbox = document.createElement('input');
-      catCheckbox.type = 'checkbox';
-      catCheckbox.checked = names.every(name => mapBuildingVisibility[name] !== false);
-      catCheckbox.indeterminate = names.some(name => mapBuildingVisibility[name]) && !catCheckbox.checked;
-      catCheckbox.addEventListener('change', () => {
-        const on = catCheckbox.checked;
-        list.forEach(p => { mapBuildingVisibility[p.name] = on; });
-        catDiv.querySelectorAll('.map-legend-item-toggle input[type="checkbox"]').forEach(cb => { cb.checked = on; });
-        catCheckbox.indeterminate = false;
-        setRectVisibility(g, mapBuildingVisibility);
-      });
-      const catTitleText = document.createElement('span');
-      catTitleText.textContent = cat;
-      catTitleRow.appendChild(catCheckbox);
-      catTitleRow.appendChild(catTitleText);
-      catDiv.appendChild(catTitleRow);
-      names.forEach(name => {
-        const count = list.filter(p => p.name === name).length;
-        const color = hashColor(name);
-        const item = document.createElement('label');
-        item.className = 'map-legend-item map-legend-item-toggle';
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.checked = mapBuildingVisibility[name] !== false;
-        checkbox.addEventListener('change', () => {
-          mapBuildingVisibility[name] = checkbox.checked;
-          setRectVisibility(g, mapBuildingVisibility);
-          updateCategoryCheckbox(catCheckbox, catDiv);
-        });
-        const dot = document.createElement('span');
-        dot.className = 'map-legend-dot';
-        dot.style.background = color;
-        const label = document.createElement('span');
-        label.textContent = name;
-        const countSpan = document.createElement('span');
-        countSpan.className = 'map-legend-count';
-        countSpan.textContent = String(count);
-        item.appendChild(checkbox);
-        item.appendChild(dot);
-        item.appendChild(label);
-        item.appendChild(countSpan);
-        catDiv.appendChild(item);
-      });
-      legend.appendChild(catDiv);
-    });
-    allBtn.addEventListener('click', () => {
-      positions.forEach(p => { mapBuildingVisibility[p.name] = true; });
-      legend.querySelectorAll('.map-legend-item-toggle input[type="checkbox"]').forEach(cb => { cb.checked = true; });
-      setRectVisibility(g, mapBuildingVisibility);
-    });
-    noneBtn.addEventListener('click', () => {
-      positions.forEach(p => { mapBuildingVisibility[p.name] = false; });
-      legend.querySelectorAll('.map-legend-item-toggle input[type="checkbox"]').forEach(cb => { cb.checked = false; });
-      setRectVisibility(g, mapBuildingVisibility);
-    });
-  }
+    legend.appendChild(catDiv);
+  });
+  allBtn.addEventListener('click', () => {
+    positions.forEach(p => { mapBuildingVisibility[p.name] = true; });
+    legend.querySelectorAll('.map-legend-item-toggle input[type="checkbox"]').forEach(cb => { cb.checked = true; });
+    setRectVisibility(g, mapBuildingVisibility);
+  });
+  noneBtn.addEventListener('click', () => {
+    positions.forEach(p => { mapBuildingVisibility[p.name] = false; });
+    legend.querySelectorAll('.map-legend-item-toggle input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+    setRectVisibility(g, mapBuildingVisibility);
+  });
   layout.appendChild(legend);
   container.appendChild(layout);
 }
@@ -2349,16 +1842,6 @@ function goBack() {
   storageSearch = '';
   storageSortField = 'name';
   storageSortDir = 'asc';
-  mapScale = 1;
-  mapTranslateX = 0;
-  mapTranslateY = 0;
-  mapBuildingVisibility = {};
-  mapViewMode = 'buildings';
-  mapBackgroundOpacity = 0.55;
-  mapBackgroundStatus = '';
-  mapBackgroundScale = 1;
-  mapBackgroundOffsetX = 0;
-  mapBackgroundOffsetY = 0;
 
   $('#activeSaveLabel').classList.add('hidden');
   $('#backBtn').classList.add('hidden');
