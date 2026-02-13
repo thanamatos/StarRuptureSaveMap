@@ -1,0 +1,2444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rupture Production</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#x1f3ed;</text></svg>" />
+  <style>
+    /* ===== Reset & Base ===== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --dark-900: #0d0d1a;
+      --dark-800: #13132b;
+      --dark-700: #1a1a3e;
+      --dark-600: #242450;
+      --dark-500: #2e2e62;
+      --accent-blue: #4a9eff;
+      --accent-green: #22c55e;
+      --accent-amber: #f59e0b;
+      --gray-100: #f3f4f6;
+      --gray-200: #e5e7eb;
+      --gray-300: #d1d5db;
+      --gray-400: #9ca3af;
+      --gray-500: #6b7280;
+      --gray-600: #4b5563;
+      --red-300: #fca5a5;
+      --red-400: #f87171;
+      --red-700: #b91c1c;
+      --red-900-30: rgba(127, 29, 29, 0.3);
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: var(--dark-900);
+      color: var(--gray-100);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: var(--dark-800); }
+    ::-webkit-scrollbar-thumb { background: var(--dark-500); border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--accent-blue); }
+
+    /* ===== Layout ===== */
+    .app { min-height: 100vh; display: flex; flex-direction: column; }
+
+    header {
+      background: var(--dark-800);
+      border-bottom: 1px solid var(--dark-600);
+      position: sticky; top: 0; z-index: 10;
+    }
+
+    .header-inner {
+      max-width: 80rem; margin: 0 auto; padding: 0.75rem 1rem;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+
+    .header-left { display: flex; align-items: center; gap: 0.75rem; }
+
+    .logo { font-size: 1.25rem; font-weight: 700; color: var(--gray-100); }
+    .logo-accent { color: var(--accent-blue); }
+
+    .active-save-label {
+      font-size: 0.875rem; color: var(--gray-500);
+    }
+
+    .back-btn {
+      background: none; border: none; cursor: pointer;
+      font-size: 0.875rem; color: var(--gray-400);
+      display: flex; align-items: center; gap: 0.25rem;
+      transition: color 0.15s;
+    }
+    .back-btn:hover { color: var(--accent-blue); }
+    .back-btn svg { width: 1rem; height: 1rem; }
+
+    /* ===== Tabs ===== */
+    .tabs-container { max-width: 80rem; margin: 0 auto; padding: 0 1rem; }
+    .tabs-nav { display: flex; gap: 0.25rem; }
+
+    .tab-btn {
+      background: none; border: none; cursor: pointer;
+      padding: 0.625rem 1rem; font-size: 0.875rem; font-weight: 500;
+      border-radius: 0.5rem 0.5rem 0 0;
+      color: var(--gray-400); position: relative;
+      transition: color 0.15s, background 0.15s;
+    }
+    .tab-btn:hover { color: var(--gray-200); background: var(--dark-700); }
+    .tab-btn.active { background: var(--dark-900); color: var(--accent-blue); }
+    .tab-btn.active::after {
+      content: ''; position: absolute; bottom: 0; left: 0; right: 0;
+      height: 2px; background: var(--accent-blue);
+    }
+
+    .tab-badge {
+      margin-left: 0.5rem; padding: 0.125rem 0.375rem;
+      border-radius: 0.25rem; font-size: 0.75rem;
+    }
+    .tab-btn .tab-badge { background: var(--dark-600); color: var(--gray-500); }
+    .tab-btn.active .tab-badge { background: rgba(74, 158, 255, 0.2); color: var(--accent-blue); }
+
+    /* ===== Main ===== */
+    main { flex: 1; max-width: 80rem; margin: 0 auto; width: 100%; padding: 1.5rem 1rem; }
+
+    footer {
+      background: var(--dark-800); border-top: 1px solid var(--dark-600);
+      padding: 0.75rem; text-align: center; font-size: 0.875rem; color: var(--gray-500);
+    }
+
+    /* ===== Error ===== */
+    .error-banner {
+      background: var(--red-900-30); border: 1px solid var(--red-700);
+      border-radius: 0.5rem; padding: 0.75rem 1rem; margin-bottom: 1rem;
+      color: var(--red-300);
+    }
+
+    /* ===== Loading ===== */
+    .loading-overlay {
+      position: fixed; inset: 0; background: rgba(13, 13, 26, 0.8);
+      z-index: 50; display: flex; align-items: center; justify-content: center;
+    }
+    .loading-card {
+      background: var(--dark-800); border-radius: 0.75rem; padding: 2rem;
+      display: flex; flex-direction: column; align-items: center; gap: 1rem;
+      box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
+    }
+    .spinner {
+      width: 3rem; height: 3rem; border-radius: 50%;
+      border: 2px solid transparent; border-bottom-color: var(--accent-blue);
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ===== Save Picker ===== */
+    .picker-container {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 4rem 1rem; text-align: center;
+    }
+    .picker-icon {
+      width: 5rem; height: 5rem; margin-bottom: 1.5rem; color: var(--accent-blue);
+      opacity: 0.6;
+    }
+    .picker-title { font-size: 1.25rem; font-weight: 600; color: var(--gray-200); margin-bottom: 0.5rem; }
+    .picker-subtitle { font-size: 0.875rem; color: var(--gray-500); margin-bottom: 2rem; max-width: 28rem; }
+
+    .file-input-wrapper {
+      position: relative; display: inline-block;
+    }
+    .file-input-wrapper input[type="file"] {
+      position: absolute; inset: 0; opacity: 0; cursor: pointer;
+    }
+    .file-btn {
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      padding: 0.75rem 1.5rem; font-size: 1rem; font-weight: 600;
+      background: var(--accent-blue); color: #fff; border: none;
+      border-radius: 0.5rem; cursor: pointer; transition: opacity 0.15s;
+    }
+    .file-btn:hover { opacity: 0.9; }
+    .file-btn svg { width: 1.25rem; height: 1.25rem; }
+
+    .drop-hint {
+      margin-top: 1rem; font-size: 0.875rem; color: var(--gray-500);
+    }
+
+    .drag-active {
+      outline: 2px dashed var(--accent-blue);
+      outline-offset: -4px;
+      background: rgba(74, 158, 255, 0.05);
+    }
+
+    /* ===== Summary Cards ===== */
+    .summary-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    .summary-grid-with-map { grid-template-columns: repeat(4, 1fr); }
+    @media (max-width: 640px) { .summary-grid, .summary-grid-with-map { grid-template-columns: 1fr; } }
+
+    .summary-card {
+      background: var(--dark-800); border-radius: 0.5rem; padding: 1rem;
+      cursor: pointer; transition: background 0.15s;
+    }
+    .summary-card:hover { background: var(--dark-700); }
+    .summary-label { font-size: 0.875rem; color: var(--gray-400); }
+    .summary-value { font-size: 1.5rem; font-weight: 700; }
+    .summary-sub { font-size: 0.75rem; color: var(--gray-500); margin-top: 0.25rem; }
+
+    .color-blue { color: var(--accent-blue); }
+    .color-green { color: var(--accent-green); }
+    .color-amber { color: var(--accent-amber); }
+
+    /* ===== Search Bar ===== */
+    .search-wrapper { position: relative; flex: 1; max-width: 28rem; }
+    .search-wrapper svg.search-icon {
+      position: absolute; left: 0.75rem; top: 50%; transform: translateY(-50%);
+      width: 1rem; height: 1rem; color: var(--gray-400);
+    }
+    .search-input {
+      width: 100%; padding: 0.5rem 2.5rem 0.5rem 2.5rem;
+      background: var(--dark-800); border: 1px solid var(--dark-500);
+      border-radius: 0.5rem; color: var(--gray-100); font-size: 0.875rem;
+      outline: none; transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .search-input::placeholder { color: var(--gray-500); }
+    .search-input:focus {
+      border-color: var(--accent-blue);
+      box-shadow: 0 0 0 1px var(--accent-blue);
+    }
+    .search-clear {
+      position: absolute; right: 0.75rem; top: 50%; transform: translateY(-50%);
+      background: none; border: none; cursor: pointer; color: var(--gray-400);
+      display: flex; padding: 0;
+    }
+    .search-clear:hover { color: var(--gray-200); }
+    .search-clear svg { width: 1rem; height: 1rem; }
+
+    /* ===== Toolbar Row ===== */
+    .toolbar {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;
+    }
+    .toolbar-stats { font-size: 0.875rem; color: var(--gray-400); white-space: nowrap; }
+    .toolbar-stats .stat-value { font-size: 1.125rem; font-weight: 600; }
+
+    /* ===== Filter Pills ===== */
+    .filter-pills { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+    .pill {
+      padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.875rem;
+      background: var(--dark-700); color: var(--gray-400); border: none;
+      cursor: pointer; transition: color 0.15s, background 0.15s;
+    }
+    .pill:hover { color: var(--gray-200); background: var(--dark-600); }
+    .pill.active { background: var(--accent-blue); color: #fff; }
+
+    /* ===== Card / Panel ===== */
+    .panel { background: var(--dark-800); border-radius: 0.5rem; overflow: hidden; }
+
+    /* ===== Category (Buildings) ===== */
+    .space-y > * + * { margin-top: 0.75rem; }
+
+    .cat-header {
+      width: 100%; padding: 0.75rem 1rem;
+      display: flex; align-items: center; justify-content: space-between;
+      background: none; border: none; cursor: pointer; color: inherit;
+      transition: background 0.15s;
+    }
+    .cat-header:hover { background: var(--dark-700); }
+    .cat-header-left { display: flex; align-items: center; gap: 0.75rem; }
+    .cat-header svg {
+      width: 1rem; height: 1rem; color: var(--gray-400);
+      transition: transform 0.2s;
+    }
+    .cat-header svg.open { transform: rotate(90deg); }
+    .cat-name { font-weight: 600; color: var(--accent-blue); }
+    .cat-stats { font-size: 0.875rem; color: var(--gray-400); }
+    .cat-stats .cat-placed { color: var(--gray-200); }
+
+    /* ===== Tables ===== */
+    table { width: 100%; border-collapse: collapse; }
+    thead tr { border-bottom: 1px solid var(--dark-600); }
+    th {
+      padding: 0.75rem 1rem; font-size: 0.875rem; font-weight: 500;
+      color: var(--gray-400); cursor: pointer; user-select: none;
+      transition: color 0.15s;
+    }
+    th:hover { color: var(--gray-200); }
+    th.left { text-align: left; }
+    th.right { text-align: right; }
+    .sort-icon { margin-left: 0.25rem; }
+    .sort-icon.inactive { color: var(--gray-600); }
+    .sort-icon.active { color: var(--accent-blue); }
+
+    tbody tr { transition: background 0.15s; }
+    tbody tr:hover { background: rgba(26, 26, 62, 0.5); }
+    td { padding: 0.625rem 1rem; }
+    td.left { text-align: left; }
+    td.right { text-align: right; }
+    td.mono { font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace; }
+    td.indent { padding-left: 2.75rem; }
+
+    .cat-body { border-top: 1px solid var(--dark-600); }
+    tbody.divide tr + tr { border-top: 1px solid var(--dark-700); }
+
+    .empty-msg {
+      padding: 2rem 1rem; text-align: center; color: var(--gray-500);
+    }
+
+    /* ===== Item/Building Icons ===== */
+    .item-icon, .building-icon {
+      width: 24px; height: 24px; vertical-align: middle;
+      margin-right: 0.5rem; border-radius: 4px;
+      image-rendering: pixelated;
+      flex-shrink: 0;
+    }
+    .item-icon.small, .building-icon.small {
+      width: 20px; height: 20px; margin-right: 0.375rem;
+    }
+    .name-with-icon {
+      display: inline-flex; align-items: center;
+    }
+    .pill .building-icon {
+      width: 18px; height: 18px; margin-right: 0.375rem; vertical-align: -3px;
+    }
+
+    /* ===== Map Tab ===== */
+    .map-layout {
+      display: flex; gap: 1rem; flex-wrap: wrap;
+      align-items: stretch;
+      min-height: min(70vh, 800px);
+    }
+    .map-wrapper {
+      flex: 1; min-width: 300px; min-height: 0;
+      display: flex; flex-direction: column;
+      background: var(--dark-800); border-radius: 0.5rem;
+      overflow: hidden; position: relative;
+      border: 1px solid var(--dark-600);
+    }
+    .map-container {
+      flex: 1; width: 100%; min-height: 400px;
+      cursor: grab; touch-action: none;
+      background: var(--dark-800);
+    }
+    .map-container:active { cursor: grabbing; }
+    .map-container svg {
+      display: block; width: 100%; height: 100%; min-height: 400px;
+      background: var(--dark-800);
+    }
+    .map-legend {
+      width: 220px; flex-shrink: 0;
+      background: var(--dark-800); border-radius: 0.5rem;
+      padding: 0.75rem; border: 1px solid var(--dark-600);
+      max-height: min(70vh, 800px); overflow-y: auto;
+    }
+    .map-legend-header {
+      display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem;
+      margin-bottom: 0.5rem; padding-bottom: 0.25rem; border-bottom: 1px solid var(--dark-600);
+    }
+    .map-legend h3 {
+      font-size: 0.875rem; font-weight: 600; color: var(--gray-300);
+      margin: 0; flex: 1;
+    }
+    .map-legend-toggle {
+      padding: 0.2rem 0.5rem; font-size: 0.7rem;
+      background: var(--dark-600); color: var(--gray-300);
+      border: 1px solid var(--dark-500); border-radius: 0.25rem;
+      cursor: pointer;
+    }
+    .map-legend-toggle:hover { background: var(--dark-500); color: var(--gray-100); }
+    .map-legend-cat {
+      margin-bottom: 0.75rem;
+    }
+    .map-legend-cat-title {
+      font-size: 0.75rem; font-weight: 600; color: var(--accent-blue);
+      margin-bottom: 0.25rem;
+    }
+    .map-legend-cat-toggle {
+      display: flex; align-items: center; gap: 0.5rem;
+      cursor: pointer; padding: 0.125rem 0;
+    }
+    .map-legend-cat-toggle input[type="checkbox"] {
+      flex-shrink: 0; cursor: pointer; accent-color: var(--accent-blue);
+    }
+    .map-legend-item {
+      display: flex; align-items: center; gap: 0.5rem;
+      font-size: 0.75rem; color: var(--gray-400);
+      padding: 0.125rem 0;
+    }
+    .map-legend-item-toggle {
+      cursor: pointer;
+    }
+    .map-legend-item-toggle input[type="checkbox"] {
+      flex-shrink: 0; cursor: pointer; accent-color: var(--accent-blue);
+    }
+    .map-legend-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .map-legend-item .map-legend-count { color: var(--gray-500); margin-left: auto; }
+    .map-toolbar {
+      display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem;
+      background: var(--dark-800); border-bottom: 1px solid var(--dark-600);
+      flex-wrap: wrap;
+    }
+    .map-toolbar-label { font-size: 0.75rem; color: var(--gray-500); margin-right: 0.25rem; }
+    .map-toolbar input[type="radio"] { accent-color: var(--accent-blue); cursor: pointer; }
+    .map-toolbar label:not(.map-legend-cat-toggle) { font-size: 0.75rem; color: var(--gray-400); cursor: pointer; }
+    .map-toolbar button {
+      padding: 0.375rem 0.75rem; font-size: 0.75rem;
+      background: var(--dark-700); color: var(--gray-300);
+      border: 1px solid var(--dark-600); border-radius: 0.25rem;
+      cursor: pointer;
+    }
+    .map-toolbar button:hover { background: var(--dark-600); color: var(--gray-100); }
+    .map-toolbar-sep {
+      width: 1px; height: 1.25rem; background: var(--dark-600);
+      margin: 0 0.25rem;
+    }
+    .map-bg-toggle {
+      display: inline-flex; align-items: center; gap: 0.35rem;
+      font-size: 0.75rem; color: var(--gray-400);
+    }
+    .map-bg-toggle input[type="checkbox"] {
+      cursor: pointer; accent-color: var(--accent-blue);
+    }
+    .map-bg-url {
+      width: min(28rem, 100%);
+      min-width: 14rem;
+      padding: 0.35rem 0.5rem;
+      font-size: 0.75rem;
+      background: var(--dark-700);
+      color: var(--gray-200);
+      border: 1px solid var(--dark-500);
+      border-radius: 0.25rem;
+      outline: none;
+    }
+    .map-bg-url:focus {
+      border-color: var(--accent-blue);
+      box-shadow: 0 0 0 1px var(--accent-blue);
+    }
+    .map-bg-opacity {
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      font-size: 0.75rem; color: var(--gray-400);
+    }
+    .map-bg-opacity input[type="range"] {
+      width: 7rem;
+      accent-color: var(--accent-blue);
+      cursor: pointer;
+    }
+    .map-bg-adjust {
+      display: inline-flex; align-items: center; gap: 0.35rem;
+      font-size: 0.75rem; color: var(--gray-400);
+    }
+    .map-bg-adjust input {
+      width: 5rem;
+      padding: 0.25rem 0.35rem;
+      font-size: 0.75rem;
+      background: var(--dark-700);
+      color: var(--gray-200);
+      border: 1px solid var(--dark-500);
+      border-radius: 0.25rem;
+      outline: none;
+    }
+    .map-bg-adjust input:focus {
+      border-color: var(--accent-blue);
+      box-shadow: 0 0 0 1px var(--accent-blue);
+    }
+    .map-bg-status {
+      font-size: 0.6875rem;
+      color: var(--gray-500);
+    }
+    .map-bg-status.ok { color: var(--accent-green); }
+    .map-bg-status.err { color: var(--red-400); }
+    .map-legend-item-production { display: flex; align-items: center; gap: 0.5rem; font-size: 0.75rem; color: var(--gray-400); padding: 0.25rem 0; }
+    .map-hover-label {
+      position: absolute; pointer-events: none;
+      padding: 0.35rem 0.6rem; border-radius: 0.25rem;
+      background: var(--dark-700); border: 1px solid var(--dark-500);
+      color: var(--gray-100); font-size: 0.8125rem; font-weight: 500;
+      white-space: nowrap; box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+      z-index: 10; opacity: 0; transition: opacity 0.1s;
+    }
+    .map-hover-label.visible { opacity: 1; }
+    .map-hover-label-cat { font-size: 0.6875rem; color: var(--gray-400); font-weight: 400; margin-top: 0.125rem; }
+    .map-hover-label-produces { font-size: 0.6875rem; color: var(--accent-green); font-weight: 500; margin-top: 0.25rem; }
+
+    /* ===== Utilities ===== */
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+<div class="app" id="app">
+  <!-- Header -->
+  <header>
+    <div class="header-inner">
+      <div class="header-left">
+        <div class="logo"><span class="logo-accent">Rupture</span> Production</div>
+        <span class="active-save-label hidden" id="activeSaveLabel"></span>
+      </div>
+      <button class="back-btn hidden" id="backBtn" onclick="goBack()">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+        Change Save
+      </button>
+    </div>
+    <div class="tabs-container hidden" id="tabsContainer">
+      <nav class="tabs-nav" id="tabsNav"></nav>
+    </div>
+  </header>
+
+  <!-- Loading -->
+  <div class="loading-overlay hidden" id="loadingOverlay">
+    <div class="loading-card">
+      <div class="spinner"></div>
+      <div style="color: var(--gray-300)">Parsing save file...</div>
+      <div style="color: var(--gray-500); font-size: 0.875rem">This may take a moment for large saves</div>
+    </div>
+  </div>
+
+  <!-- Main -->
+  <main id="mainContent"></main>
+
+  <!-- Footer -->
+  <footer>Rupture Production &mdash; Star Rupture Save Analyzer</footer>
+</div>
+
+<script>
+// ===== Embedded Items Data =====
+const ITEMS_DATA = {
+  "Buildings": [
+    { "InternalName": "/Game/Chimera/Buildings/MechanicalDrill/DA_MechanicalDrill.DA_MechanicalDrill", "Name": "Ore Extractor", "Category": "Extraction" },
+    { "InternalName": "/Game/Chimera/Buildings/AcidExtractor/DA_AcidExtractor.DA_AcidExtractor", "Name": "Sulfur Extractor", "Category": "Extraction" },
+    { "InternalName": "/Game/Chimera/Buildings/GasExtractor/DA_GasExtractor.DA_GasExtractor", "Name": "Helium-3 Extractor", "Category": "Extraction" },
+    { "InternalName": "/Game/Chimera/Buildings/Smelter/DA_Smelter.DA_Smelter", "Name": "Smelter", "Category": "Ore Processing" },
+    { "InternalName": "/Game/Chimera/Buildings/Furnace/DA_Furnace.DA_Furnace", "Name": "Furnace", "Category": "Ore Processing" },
+    { "InternalName": "/Game/Chimera/Buildings/Refinery/DA_Refinery.DA_Refinery", "Name": "Refinery", "Category": "Ore Processing" },
+    { "InternalName": "/Game/Chimera/Buildings/Crafter/DA_Crafter.DA_Crafter", "Name": "Fabricator", "Category": "Crafting" },
+    { "InternalName": "/Game/Chimera/Buildings/Assembler/DA_Assembler.DA_Assembler", "Name": "Assembler", "Category": "Crafting" },
+    { "InternalName": "/Game/Chimera/Buildings/Hammer/DA_Hammer.DA_Hammer", "Name": "Mega Press", "Category": "Crafting" },
+    { "InternalName": "/Game/Chimera/Buildings/Synthetizer/DA_Synthetizer.DA_Synthetizer", "Name": "Compounder", "Category": "Crafting" },
+    { "InternalName": "/Game/Chimera/Buildings/BaseCore/DA_BaseCore.DA_BaseCore", "Name": "Base Core", "Category": "Base Core" },
+    { "InternalName": "/Game/Chimera/Buildings/Hub/DA_Hub.DA_Hub", "Name": "Hub", "Category": "Base Core" },
+    { "InternalName": "/Game/Chimera/Buildings/Antena/DA_Antena.DA_Antena", "Name": "Antenna", "Category": "Base Core" },
+    { "InternalName": "/Game/Chimera/Buildings/Teleporter/DA_Teleporter.DA_Teleporter", "Name": "Teleporter", "Category": "Base Core" },
+    { "InternalName": "/Game/Chimera/Buildings/Storage/DA_Storage.DA_Storage", "Name": "Storage", "IsStorage": true, "Category": "Storage and Transport" },
+    { "InternalName": "/Game/Chimera/Buildings/Interiors/PersonalStorage/DA_PersonalStorage.DA_PersonalStorage", "Name": "Personal Storage", "IsStorage": true, "Category": "Storage and Transport" },
+    { "InternalName": "/Game/Chimera/Buildings/Interiors/PersonalStorageBig/DA_PersonalStorageBig.DA_PersonalStorageBig", "Name": "Large Personal Storage", "IsStorage": true, "Category": "Storage and Transport" },
+    { "InternalName": "/Game/Chimera/Buildings/Interiors/PersonalStorage/PersonalStorage_NonDeconstructible/DA_PersonalStorage_NonDeconstructible.DA_PersonalStorage_NonDeconstructible", "Name": "Personal Storage (Fixed)", "IsStorage": true, "Category": "Storage and Transport" },
+    { "InternalName": "/Game/Chimera/Buildings/ResourceRedistributor/DA_ResourceRedistributor.DA_ResourceRedistributor", "Name": "Resource Redistributor", "Category": "Storage and Transport" },
+    { "InternalName": "/Game/Chimera/Buildings/PackageStation/PackageSender/DA_PackageSender.DA_PackageSender", "Name": "Package Sender", "Category": "Storage and Transport" },
+    { "InternalName": "/Game/Chimera/Buildings/PackageStation/PackageReceiver/DA_PackageReceiver.DA_PackageReceiver", "Name": "Package Receiver", "Category": "Storage and Transport" },
+    { "InternalName": "/Game/Chimera/Buildings/DroneConnections/DroneRail/DA_DroneRailT1.DA_DroneRailT1", "Name": "Drone Rail T1", "Category": "Rails" },
+    { "InternalName": "/Game/Chimera/Buildings/DroneConnections/DroneRail/DA_DroneRailT2.DA_DroneRailT2", "Name": "Drone Rail T2", "Category": "Rails" },
+    { "InternalName": "/Game/Chimera/Buildings/DroneConnections/DroneRail/DA_DroneRailT3.DA_DroneRailT3", "Name": "Drone Rail T3", "Category": "Rails" },
+    { "InternalName": "/Game/Chimera/Buildings/DroneConnections/DronePole/DroneRailSupport/DA_DroneRailSupport.DA_DroneRailSupport", "Name": "Drone Rail Support", "Category": "Rails" },
+    { "InternalName": "/Game/Chimera/Buildings/DroneConnections/InvisibleConnection/DA_DroneInvisiblePole.DA_DroneInvisiblePole", "Name": "Drone Invisible Pole", "Category": "Rails" },
+    { "InternalName": "/Game/Chimera/Drones/DA_RailDroneConfig.DA_RailDroneConfig", "Name": "Drone", "Category": "Rails" },
+    { "InternalName": "/Game/Chimera/Buildings/DroneConnections/DroneJunction/DA_DroneJunction_4.DA_DroneJunction_4", "Name": "Drone Junction", "Category": "Junctions" },
+    { "InternalName": "/Game/Chimera/Buildings/DroneConnections/DroneJunction/DA_DroneMerger_3To1.DA_DroneMerger_3To1", "Name": "Drone Merger (3-to-1)", "Category": "Junctions" },
+    { "InternalName": "/Game/Chimera/Buildings/DroneConnections/DroneJunction/DA_DroneMerger_5To1.DA_DroneMerger_5To1", "Name": "Drone Merger (5-to-1)", "Category": "Junctions" },
+    { "InternalName": "/Game/Chimera/Buildings/DroneConnections/DroneJunction/DA_DroneLane_3.DA_DroneLane_3", "Name": "Drone Lane", "Category": "Junctions" },
+    { "InternalName": "/Game/Chimera/Buildings/SolarPowerGenerator/DA_SolarPowerGenerator.DA_SolarPowerGenerator", "Name": "Solar Power Generator T1", "Category": "Power" },
+    { "InternalName": "/Game/Chimera/Buildings/SolarPowerGeneratorTier2/DA_SolarPowerGeneratorTier2.DA_SolarPowerGeneratorTier2", "Name": "Solar Power Generator T2", "Category": "Power" },
+    { "InternalName": "/Game/Chimera/Buildings/WindPowerGenerator/DA_WindPowerGenerator.DA_WindPowerGenerator", "Name": "Wind Power Generator T1", "Category": "Power" },
+    { "InternalName": "/Game/Chimera/Buildings/WindPowerGeneratorTier2/DA_WindPowerGeneratorTier2.DA_WindPowerGeneratorTier2", "Name": "Wind Power Generator T2", "Category": "Power" },
+    { "InternalName": "/Game/Chimera/Buildings/Cooler/Passive/DA_CoolerPassive.DA_CoolerPassive", "Name": "Passive Cooler", "Category": "Cooling" },
+    { "InternalName": "/Game/Chimera/Buildings/Cooler/Active/DA_CoolerActive.DA_CoolerActive", "Name": "Active Cooler", "Category": "Cooling" },
+    { "InternalName": "/Game/Chimera/Buildings/Turret_Tier1/DA_TurretTier1.DA_TurretTier1", "Name": "Turret T1", "Category": "Defensive" },
+    { "InternalName": "/Game/Chimera/Buildings/Turret_Tier2/DA_TurretTier2.DA_TurretTier2", "Name": "Turret T2", "Category": "Defensive" },
+    { "InternalName": "/Game/Chimera/Buildings/Interiors/Armory/DA_Armory.DA_Armory", "Name": "Armory", "Category": "Defensive" },
+    { "InternalName": "/Game/Chimera/Buildings/Modular/Habitats/HabitatSmall/DA_HabitatSmall.DA_HabitatSmall", "Name": "Habitat (Small)", "Category": "Habitats" },
+    { "InternalName": "/Game/Chimera/Buildings/Modular/HabitatModules/Airlock/DA_Airlock.DA_Airlock", "Name": "Airlock", "Category": "Habitat Modules" },
+    { "InternalName": "/Game/Chimera/Buildings/Modular/HabitatModules/Airlock/Airlock_NonDeconstructible/DA_Airlock_StartingHUB.DA_Airlock_StartingHUB", "Name": "Airlock (Starting Hub)", "Category": "Habitat Modules" },
+    { "InternalName": "/Game/Chimera/Buildings/Modular/HabitatModules/Viewport/ViewportLeft/DA_ViewportLeft.DA_ViewportLeft", "Name": "Viewport (Left)", "Category": "Habitat Modules" },
+    { "InternalName": "/Game/Chimera/Buildings/Modular/HabitatModules/Viewport/ViewportMiddle/DA_ViewportMiddle.DA_ViewportMiddle", "Name": "Viewport (Middle)", "Category": "Habitat Modules" },
+    { "InternalName": "/Game/Chimera/Buildings/Modular/HabitatModules/Viewport/ViewportRight/DA_ViewportRight.DA_ViewportRight", "Name": "Viewport (Right)", "Category": "Habitat Modules" },
+    { "InternalName": "/Game/Chimera/Buildings/Modular/HabitatModules/Viewport/ViewportSingle/DA_ViewportSingle.DA_ViewportSingle", "Name": "Viewport (Single)", "Category": "Habitat Modules" },
+    { "InternalName": "/Game/Chimera/Buildings/Modular/HabitatModules/RoomBridges/VerticalBridge/DA_VerticalBridge.DA_VerticalBridge", "Name": "Vertical Bridge", "Category": "Habitat Modules" },
+    { "InternalName": "/Game/Chimera/Buildings/Modular/HabitatModules/RoomBridges/HorizontalBridge/DA_HorizontalBridge.DA_HorizontalBridge", "Name": "Horizontal Bridge", "Category": "Habitat Modules" },
+    { "InternalName": "/Game/Chimera/Buildings/Interiors/ItemPrinter/DA_ItemPrinter.DA_ItemPrinter", "Name": "Item Printer", "Category": "Progression" },
+    { "InternalName": "/Game/Chimera/Buildings/Hub/StartingPrinter/DA_StartingItemPrinter.DA_StartingItemPrinter", "Name": "Item Printer (Starting)", "Category": "Progression" },
+    { "InternalName": "/Game/Chimera/Buildings/Interiors/ResearchTerminal/DA_ResearchTerminal.DA_ResearchTerminal", "Name": "Research Terminal", "Category": "Progression" },
+    { "InternalName": "/Game/Chimera/Buildings/Interiors/RecipeTable/DA_RecipeTable.DA_RecipeTable", "Name": "Recipe Table", "Category": "Progression" },
+    { "InternalName": "/Game/Chimera/Buildings/Interiors/Analyzer/DA_Analyzer.DA_Analyzer", "Name": "Analyzer", "Category": "Progression" },
+    { "InternalName": "/Game/Chimera/Buildings/Interiors/CloningBed/DA_CloningBed.DA_CloningBed", "Name": "Cloning Bed", "Category": "Progression" },
+    { "InternalName": "/Game/Chimera/Buildings/Interiors/CloningBed/CloningBed_NonDeconstructible/DA_CloningBed_NonDeconstructible.DA_CloningBed_NonDeconstructible", "Name": "Cloning Bed (Fixed)", "Category": "Progression" },
+    { "InternalName": "/Game/Chimera/Buildings/Interiors/CloningBed/CloningBed_Lander/DA_CloningBed_Lander.DA_CloningBed_Lander", "Name": "Cloning Bed (Lander)", "Category": "Progression" },
+    { "InternalName": "/Game/Chimera/Buildings/Interiors/FoodProcessor/DA_FoodProcessor.DA_FoodProcessor", "Name": "Food Processor", "Category": "Progression" },
+    { "InternalName": "/Game/Chimera/Buildings/Interiors/SuitWorkshop/DA_SuitWorkshop.DA_SuitWorkshop", "Name": "Suit Workshop", "Category": "Progression" },
+    { "InternalName": "/Game/Chimera/Buildings/Modular/Foundations/FoundationStability/DA_Modular_BasePlatformStability.DA_Modular_BasePlatformStability", "Name": "Foundation Stability", "Category": "Modular Components" },
+    { "InternalName": "/Game/Chimera/Buildings/Modular/Foundations/FoundationStability/DA_Modular_ConnectingPlatformStability.DA_Modular_ConnectingPlatformStability", "Name": "Connecting Platform Stability", "Category": "Modular Components" },
+    { "InternalName": "/Game/Chimera/Buildings/Modular/Tiles/BasePlatform/DA_Modular_BasePlatform.DA_Modular_BasePlatform", "Name": "Base Platform", "Category": "Modular Components" },
+    { "InternalName": "/Game/Chimera/Buildings/Modular/Tiles/ConnectingPlatform/DA_Modular_ConnectingPlatform.DA_Modular_ConnectingPlatform", "Name": "Connecting Platform", "Category": "Modular Components" },
+    { "InternalName": "/Game/Chimera/Buildings/Modular/PillarSupport/DA_Modular_PillarSupport.DA_Modular_PillarSupport", "Name": "Pillar Support", "Category": "Modular Components" },
+    { "InternalName": "/Game/Chimera/Buildings/Modular/Tiles/Stairs/DA_Modular_Stairs.DA_Modular_Stairs", "Name": "Stairs", "Category": "Modular Components" },
+    { "InternalName": "/Game/Chimera/Buildings/Modular/Tiles/Stairs/StairsFlat/DA_Modular_StairsFlat.DA_Modular_StairsFlat", "Name": "Stairs (Flat)", "Category": "Modular Components" },
+    { "InternalName": "/Game/Chimera/Buildings/Modular/Walkway/DA_Walkway.DA_Walkway", "Name": "Walkway", "Category": "Modular Components" }
+  ],
+  "Items": [
+    { "ItemName": "Accumulator", "InternalName": "/Game/Chimera/Crafting/CR_Accumulator.CR_Accumulator", "BuildingName": "Assembler", "AmountProduced": 1, "Seconds": 6 },
+    { "ItemName": "Applicator", "InternalName": "/Game/Chimera/Crafting/CR_Syringe.CR_Syringe", "BuildingName": "Fabricator", "AmountProduced": 1, "Seconds": 4 },
+    { "ItemName": "Basic Building Material", "InternalName": "/Game/Chimera/Crafting/CR_BasicBuildingMaterial.CR_BasicBuildingMaterial", "BuildingName": "Fabricator", "AmountProduced": 10, "Seconds": 2 },
+    { "ItemName": "Battery", "InternalName": "/Game/Chimera/Crafting/CR_Battery.CR_Battery", "BuildingName": "Mega Press", "AmountProduced": 1, "Seconds": 4 },
+    { "ItemName": "Calcite Sheets", "InternalName": "/Game/Chimera/Crafting/CR_CalciteSheets.CR_CalciteSheets", "BuildingName": "Fabricator", "AmountProduced": 2, "Seconds": 2 },
+    { "ItemName": "Calcium Block", "InternalName": "/Game/Chimera/Crafting/CR_CalciumBlock.CR_CalciumBlock", "BuildingName": "Smelter", "AmountProduced": 2, "Seconds": 2 },
+    { "ItemName": "Calcium Ore (Impure)", "InternalName": "/Game/Chimera/Crafting/MechanicalDrill/CR_CalciumOreImpure_MechanicalDrill.CR_CalciumOreImpure_MechanicalDrill", "BuildingName": "Ore Extractor", "AmountProduced": 2, "Seconds": 2 },
+    { "ItemName": "Calcium Ore (Pure)", "InternalName": "/Game/Chimera/Crafting/MechanicalDrill/CR_CalciumOreImpure_MechanicalDrill.CR_CalciumOrePure_MechanicalDrill", "BuildingName": "Ore Extractor", "AmountProduced": 8, "Seconds": 2 },
+    { "ItemName": "Calcium Ore", "InternalName": "/Game/Chimera/Crafting/MechanicalDrill/CR_CalciumOre_MechanicalDrill.CR_CalciumOre_MechanicalDrill", "BuildingName": "Ore Extractor", "AmountProduced": 4, "Seconds": 2 },
+    { "ItemName": "Calcium Powder", "InternalName": "/Game/Chimera/Crafting/CR_CalciumPowder.CR_CalciumPowder", "BuildingName": "Furnace", "AmountProduced": 3, "Seconds": 3 },
+    { "ItemName": "Ceramics", "InternalName": "/Game/Chimera/Crafting/CR_Ceramics.CR_Ceramics", "BuildingName": "Furnace", "AmountProduced": 2, "Seconds": 2 },
+    { "ItemName": "Chemicals", "InternalName": "/Game/Chimera/Crafting/CR_Explosive.CR_Explosive", "BuildingName": "Furnace", "AmountProduced": 2, "Seconds": 2 },
+    { "ItemName": "Condenser", "InternalName": "/Game/Chimera/Crafting/CR_Condenser.CR_Condenser", "BuildingName": "Assembler", "AmountProduced": 1, "Seconds": 15 },
+    { "ItemName": "Electromagnet", "InternalName": "/Game/Chimera/Crafting/CR_Electromagnet.CR_Electromagnet", "BuildingName": "Assembler", "AmountProduced": 1, "Seconds": 5 },
+    { "ItemName": "Electromagnetic Coil", "InternalName": "/Game/Chimera/Crafting/CR_ElectromagneticCoil.CR_ElectromagneticCoil", "BuildingName": "Mega Press", "AmountProduced": 1, "Seconds": 4 },
+    { "ItemName": "Electronics", "InternalName": "/Game/Chimera/Crafting/CR_Electronics.CR_Electronics", "BuildingName": "Furnace", "AmountProduced": 1, "Seconds": 5 },
+    { "ItemName": "Generator", "InternalName": "/Game/Chimera/Crafting/CR_Generator.CR_Generator", "BuildingName": "Assembler", "AmountProduced": 1, "Seconds": 10 },
+    { "ItemName": "Glass", "InternalName": "/Game/Chimera/Crafting/CR_Glass.CR_Glass", "BuildingName": "Furnace", "AmountProduced": 1, "Seconds": 3 },
+    { "ItemName": "Hardening Agent", "InternalName": "/Game/Chimera/Crafting/CR_HardeningAgent.CR_HardeningAgent", "BuildingName": "Furnace", "AmountProduced": 2, "Seconds": 4 },
+    { "ItemName": "Heat Resistant Sheet", "InternalName": "/Game/Chimera/Crafting/CR_HeatResistantSheet.CR_HeatResistantSheet", "BuildingName": "Furnace", "AmountProduced": 1, "Seconds": 4 },
+    { "ItemName": "Heavy Ammo", "InternalName": "/Game/Chimera/Crafting/CR_HeavyAmmo.CR_HeavyAmmo", "BuildingName": "Mega Press", "AmountProduced": 15, "Seconds": 6 },
+    { "ItemName": "Helium-3", "InternalName": "/Game/Chimera/Crafting/CR_Helium.CR_Helium", "BuildingName": "Helium-3 Extractor", "AmountProduced": 8, "Seconds": 2 },
+    { "ItemName": "Impeller", "InternalName": "/Game/Chimera/Crafting/CR_Impeller.CR_Impeller", "BuildingName": "Mega Press", "AmountProduced": 1, "Seconds": 4 },
+    { "ItemName": "Inductor", "InternalName": "/Game/Chimera/Crafting/CR_Coil.CR_Coil", "BuildingName": "Furnace", "AmountProduced": 1, "Seconds": 3 },
+    { "ItemName": "Intermediate Building Material", "InternalName": "/Game/Chimera/Crafting/CR_IntermediateBuildingMaterial.CR_IntermediateBuildingMaterial", "BuildingName": "Mega Press", "AmountProduced": 25, "Seconds": 6 },
+    { "ItemName": "Ion Injector", "InternalName": "/Game/Chimera/Crafting/CR_IonInjector.CR_IonInjector", "BuildingName": "Compounder", "AmountProduced": 1, "Seconds": 12 },
+    { "ItemName": "Laser Emitter", "InternalName": "/Game/Chimera/Crafting/CR_LaserEmitter.CR_LaserEmitter", "BuildingName": "Assembler", "AmountProduced": 1, "Seconds": 6 },
+    { "ItemName": "Lens", "InternalName": "/Game/Chimera/Crafting/CR_Lens.CR_Lens", "BuildingName": "Compounder", "AmountProduced": 1, "Seconds": 12 },
+    { "ItemName": "Liquid Helium", "InternalName": "/Game/Chimera/Crafting/CR_LiquidHelium.CR_LiquidHelium", "BuildingName": "Compounder", "AmountProduced": 1, "Seconds": 3 },
+    { "ItemName": "Nanofiber", "InternalName": "/Game/Chimera/Crafting/CR_Nanofibre.CR_Nanofibre", "BuildingName": "Compounder", "AmountProduced": 1, "Seconds": 5 },
+    { "ItemName": "Nozzle", "InternalName": "/Game/Chimera/Crafting/CR_Nozzle.CR_Nozzle", "BuildingName": "Mega Press", "AmountProduced": 1, "Seconds": 5 },
+    { "ItemName": "Pistol Ammo", "InternalName": "/Game/Chimera/Crafting/CR_PistolAmmoItem.CR_PistolAmmoItem", "BuildingName": "Fabricator", "AmountProduced": 25, "Seconds": 4 },
+    { "ItemName": "Pressure Tank", "InternalName": "/Game/Chimera/Crafting/CR_PressureTank.CR_PressureTank", "BuildingName": "Assembler", "AmountProduced": 1, "Seconds": 12 },
+    { "ItemName": "Pressurized Helium", "InternalName": "/Game/Chimera/Crafting/CR_PressurizedHelium.CR_PressurizedHelium", "BuildingName": "Refinery", "AmountProduced": 1, "Seconds": 2 },
+    { "ItemName": "Pump", "InternalName": "/Game/Chimera/Crafting/CR_Pump.CR_Pump", "BuildingName": "Mega Press", "AmountProduced": 1, "Seconds": 10 },
+    { "ItemName": "Resonator", "InternalName": "/Game/Chimera/Crafting/CR_Resonator.CR_Resonator", "BuildingName": "Assembler", "AmountProduced": 1, "Seconds": 12 },
+    { "ItemName": "Rotor", "InternalName": "/Game/Chimera/Crafting/CR_Rotor.CR_Rotor", "BuildingName": "Fabricator", "AmountProduced": 1, "Seconds": 6 },
+    { "ItemName": "Scanner", "InternalName": "/Game/Chimera/Crafting/CR_Scanner.CR_Scanner", "BuildingName": "Assembler", "AmountProduced": 1, "Seconds": 10 },
+    { "ItemName": "Shotgun Ammo", "InternalName": "/Game/Chimera/Crafting/CR_ShotgunAmmo.CR_ShotgunAmmo", "BuildingName": "Mega Press", "AmountProduced": 15, "Seconds": 6 },
+    { "ItemName": "Stabilizer", "InternalName": "/Game/Chimera/Crafting/CR_Gyroscope.CR_Gyroscope", "BuildingName": "Fabricator", "AmountProduced": 1, "Seconds": 6 },
+    { "ItemName": "Standard Ammo", "InternalName": "/Game/Chimera/Crafting/CR_StandardAmmo.CR_StandardAmmo", "BuildingName": "Mega Press", "AmountProduced": 20, "Seconds": 6 },
+    { "ItemName": "Stator", "InternalName": "/Game/Chimera/Crafting/CR_Stator.CR_Stator", "BuildingName": "Fabricator", "AmountProduced": 1, "Seconds": 3 },
+    { "ItemName": "Sulfur Ore", "InternalName": "/Game/Chimera/Crafting/CR_SulphurOre.CR_SulphurOre", "BuildingName": "Sulfur Extractor", "AmountProduced": 8, "Seconds": 2 },
+    { "ItemName": "Sulfuric Acid", "InternalName": "/Game/Chimera/Crafting/CR_SulphuricAcid.CR_SulphuricAcid", "BuildingName": "Refinery", "AmountProduced": 1, "Seconds": 0.5 },
+    { "ItemName": "Superconductor", "InternalName": "/Game/Chimera/Crafting/CR_Superconductor.CR_Superconductor", "BuildingName": "Compounder", "AmountProduced": 1, "Seconds": 5 },
+    { "ItemName": "Supermagnet", "InternalName": "/Game/Chimera/Crafting/CR_Supermagnet.CR_Supermagnet", "BuildingName": "Furnace", "AmountProduced": 1, "Seconds": 3 },
+    { "ItemName": "Synthetic Resin", "InternalName": "/Game/Chimera/Crafting/CR_SyntheticResin.CR_SyntheticResin", "BuildingName": "Compounder", "AmountProduced": 1, "Seconds": 3 },
+    { "ItemName": "Synthetic Silicon", "InternalName": "/Game/Chimera/Crafting/CR_SilicaSand.CR_SilicaSand", "BuildingName": "Furnace", "AmountProduced": 2, "Seconds": 2 },
+    { "ItemName": "Titanium Bar", "InternalName": "/Game/Chimera/Crafting/CR_TitaniumBar.CR_TitaniumBar", "BuildingName": "Smelter", "AmountProduced": 2, "Seconds": 2 },
+    { "ItemName": "Titanium Beam", "InternalName": "/Game/Chimera/Crafting/CR_TitaniumBeam.CR_TitaniumBeam", "BuildingName": "Fabricator", "AmountProduced": 1, "Seconds": 3 },
+    { "ItemName": "Titanium Housing", "InternalName": "/Game/Chimera/Crafting/CR_TitaniumHousing.CR_TitaniumHousing", "BuildingName": "Furnace", "AmountProduced": 1, "Seconds": 2 },
+    { "ItemName": "Titanium Ore (Impure)", "InternalName": "/Game/Chimera/Crafting/MechanicalDrill/CR_TitaniumOreImpure_MechanicalDrill.CR_TitaniumOreImpure_MechanicalDrill", "BuildingName": "Ore Extractor", "AmountProduced": 2, "Seconds": 2 },
+    { "ItemName": "Titanium Ore (Pure)", "InternalName": "/Game/Chimera/Crafting/MechanicalDrill/CR_TitaniumOrePure_MechanicalDrill.CR_TitaniumOrePure_MechanicalDrill", "BuildingName": "Ore Extractor", "AmountProduced": 8, "Seconds": 2 },
+    { "ItemName": "Titanium Ore", "InternalName": "/Game/Chimera/Crafting/MechanicalDrill/CR_TitaniumOre_MechanicalDrill.CR_TitaniumOre_MechanicalDrill", "BuildingName": "Ore Extractor", "AmountProduced": 4, "Seconds": 2 },
+    { "ItemName": "Titanium Rod", "InternalName": "/Game/Chimera/Crafting/CR_TitaniumRod.CR_TitaniumRod", "BuildingName": "Fabricator", "AmountProduced": 1, "Seconds": 2 },
+    { "ItemName": "Titanium Sheet", "InternalName": "/Game/Chimera/Crafting/CR_TitaniumSheet.CR_TitaniumSheet", "BuildingName": "Fabricator", "AmountProduced": 2, "Seconds": 2 },
+    { "ItemName": "Tube", "InternalName": "/Game/Chimera/Crafting/CR_Tube.CR_Tube", "BuildingName": "Fabricator", "AmountProduced": 2, "Seconds": 2 },
+    { "ItemName": "Turbine", "InternalName": "/Game/Chimera/Crafting/CR_Turbine.CR_Turbine", "BuildingName": "Mega Press", "AmountProduced": 1, "Seconds": 6 },
+    { "ItemName": "Valve", "InternalName": "/Game/Chimera/Crafting/CR_Valve.CR_Valve", "BuildingName": "Mega Press", "AmountProduced": 1, "Seconds": 10 },
+    { "ItemName": "Wolfram Bar", "InternalName": "/Game/Chimera/Crafting/CR_WolframBar.CR_WolframBar", "BuildingName": "Smelter", "AmountProduced": 2, "Seconds": 2 },
+    { "ItemName": "Wolfram Ore (Impure)", "InternalName": "/Game/Chimera/Crafting/MechanicalDrill/CR_WolframOreImpure_MechanicalDrill.CR_WolframOreImpure_MechanicalDrill", "BuildingName": "Ore Extractor", "AmountProduced": 2, "Seconds": 2 },
+    { "ItemName": "Wolfram Ore (Pure)", "InternalName": "/Game/Chimera/Crafting/MechanicalDrill/CR_WolframOrePure_MechanicalDrill.CR_WolframOrePure_MechanicalDrill", "BuildingName": "Ore Extractor", "AmountProduced": 8, "Seconds": 2 },
+    { "ItemName": "Wolfram Ore", "InternalName": "/Game/Chimera/Crafting/MechanicalDrill/CR_WolframOre_MechanicalDrill.CR_WolframOre_MechanicalDrill", "BuildingName": "Ore Extractor", "AmountProduced": 4, "Seconds": 2 },
+    { "ItemName": "Wolfram Plate", "InternalName": "/Game/Chimera/Crafting/CR_WolframPlate.CR_WolframPlate", "BuildingName": "Fabricator", "AmountProduced": 1, "Seconds": 1 },
+    { "ItemName": "Wolfram Powder", "InternalName": "/Game/Chimera/Crafting/CR_WolframPowder.CR_WolframPowder", "BuildingName": "Furnace", "AmountProduced": 3, "Seconds": 2 },
+    { "ItemName": "Wolfram Wire", "InternalName": "/Game/Chimera/Crafting/CR_WolframWire.CR_WolframWire", "BuildingName": "Fabricator", "AmountProduced": 2, "Seconds": 4 }
+  ],
+  "ItemNames": {
+    "I_Accumulator": "Accumulator", "I_Syringe": "Applicator", "I_BasicBuildingMaterial": "Basic Building Material",
+    "I_Battery": "Battery", "I_CalciteSheets": "Calcite Sheets", "I_CalciumBlock": "Calcium Block",
+    "I_CalciumOre": "Calcium Ore", "I_CalciumOreImpure": "Calcium Ore (Impure)", "I_CalciumOrePure": "Calcium Ore (Pure)",
+    "I_CalciumPowder": "Calcium Powder", "I_Ceramics": "Ceramics", "I_Explosive": "Chemicals",
+    "I_Condenser": "Condenser", "I_Electromagnet": "Electromagnet", "I_ElectromagneticCoil": "Electromagnetic Coil",
+    "I_Electronics": "Electronics", "I_Generator": "Generator", "I_Glass": "Glass",
+    "I_HardeningAgent": "Hardening Agent", "I_HeatResistantSheet": "Heat Resistant Sheet", "I_HeavyAmmo": "Heavy Ammo",
+    "I_Helium": "Helium-3", "I_Impeller": "Impeller", "I_Coil": "Inductor",
+    "I_IntermediateBuildingMaterial": "Intermediate Building Material", "I_IonInjector": "Ion Injector",
+    "I_LaserEmitter": "Laser Emitter", "I_Lens": "Lens", "I_LiquidHelium": "Liquid Helium",
+    "I_Nanofibre": "Nanofiber", "I_Nozzle": "Nozzle", "I_PistolAmmoItem": "Pistol Ammo",
+    "I_PressureTank": "Pressure Tank", "I_PressurizedHelium": "Pressurized Helium", "I_Pump": "Pump",
+    "I_Resonator": "Resonator", "I_Rotor": "Rotor", "I_Scanner": "Scanner",
+    "I_ShotgunAmmo": "Shotgun Ammo", "I_Gyroscope": "Stabilizer", "I_StandardAmmo": "Standard Ammo",
+    "I_Stator": "Stator", "I_SulphurOre": "Sulfur Ore", "I_SulphuricAcid": "Sulfuric Acid",
+    "I_Superconductor": "Superconductor", "I_Supermagnet": "Supermagnet", "I_SyntheticResin": "Synthetic Resin",
+    "I_SilicaSand": "Synthetic Silicon", "I_TitaniumBar": "Titanium Bar", "I_TitaniumBeam": "Titanium Beam",
+    "I_TitaniumHousing": "Titanium Housing", "I_TitaniumOre": "Titanium Ore",
+    "I_TitaniumOreImpure": "Titanium Ore (Impure)", "I_TitaniumOrePure": "Titanium Ore (Pure)",
+    "I_TitaniumRod": "Titanium Rod", "I_TitaniumSheet": "Titanium Sheet", "I_Tube": "Tube",
+    "I_Turbine": "Turbine", "I_Valve": "Valve", "I_WolframBar": "Wolfram Bar",
+    "I_WolframOre": "Wolfram Ore", "I_WolframOreImpure": "Wolfram Ore (Impure)",
+    "I_WolframOrePure": "Wolfram Ore (Pure)", "I_WolframPlate": "Wolfram Plate",
+    "I_WolframPowder": "Wolfram Powder", "I_WolframWire": "Wolfram Wire"
+  }
+};
+
+const CATEGORY_ORDER = [
+  'Extraction', 'Ore Processing', 'Crafting', 'Base Core', 'Storage and Transport',
+  'Rails', 'Junctions', 'Power', 'Cooling', 'Defensive', 'Habitats',
+  'Habitat Modules', 'Progression', 'Modular Components',
+];
+
+// ===== Icon Mappings =====
+const ICON_BASE = 'https://www.starrupture-planner.com/icons';
+
+const ITEM_ICONS = {
+  'Accumulator': 'accumulator', 'Applicator': 'applicator',
+  'Basic Building Material': 'basic_building', 'Battery': 'battery',
+  'Calcite Sheets': 'calcite_sheets', 'Calcium Block': 'block_calcium',
+  'Calcium Ore': 'ore_calcium', 'Calcium Ore (Impure)': 'ore_calcium', 'Calcium Ore (Pure)': 'ore_calcium',
+  'Calcium Powder': 'powder_calcium', 'Ceramics': 'ceramics', 'Chemicals': 'chemicals',
+  'Condenser': 'condenser', 'Electromagnet': 'electromagnet',
+  'Electromagnetic Coil': 'electromagnetic_coil', 'Electronics': 'electronics',
+  'Generator': 'generator', 'Glass': 'glass', 'Hardening Agent': 'hardening_agent',
+  'Heat Resistant Sheet': 'heat_sheet', 'Heavy Ammo': 'heavy_ammo',
+  'Helium-3': 'helium', 'Impeller': 'impeller', 'Inductor': 'inductor',
+  'Intermediate Building Material': 'intermediate_building', 'Ion Injector': 'ion_injector',
+  'Laser Emitter': 'laser_emitter', 'Lens': 'lens', 'Liquid Helium': 'liquid_helium',
+  'Nanofiber': 'nanofiber', 'Nozzle': 'nozzle', 'Pistol Ammo': 'pistol_ammo',
+  'Pressure Tank': 'pressure_tank', 'Pressurized Helium': 'pressurized_helium',
+  'Pump': 'pump', 'Resonator': 'resonator', 'Rotor': 'rotor', 'Scanner': 'scanner',
+  'Shotgun Ammo': 'shotgun_ammo', 'Stabilizer': 'stabilizer', 'Standard Ammo': 'standard_ammo',
+  'Stator': 'stator', 'Sulfur Ore': 'ore_sulphur', 'Sulfuric Acid': 'sulphuric_acid',
+  'Superconductor': 'superconductor', 'Supermagnet': 'supermagnet',
+  'Synthetic Resin': 'synthetic_resin', 'Synthetic Silicon': 'synthetic_silicon',
+  'Titanium Bar': 'bar_titanium', 'Titanium Beam': 'titanium_beam',
+  'Titanium Housing': 'titanium_housing', 'Titanium Ore': 'ore_titanium',
+  'Titanium Ore (Impure)': 'ore_titanium', 'Titanium Ore (Pure)': 'ore_titanium',
+  'Titanium Rod': 'titanium_rod', 'Titanium Sheet': 'titanium_sheet',
+  'Tube': 'tube', 'Turbine': 'turbine', 'Valve': 'valve',
+  'Wolfram Bar': 'bar_wolfram', 'Wolfram Ore': 'ore_wolfram',
+  'Wolfram Ore (Impure)': 'ore_wolfram', 'Wolfram Ore (Pure)': 'ore_wolfram',
+  'Wolfram Plate': 'wolfram_plate', 'Wolfram Powder': 'powder_wolfram', 'Wolfram Wire': 'wolfram_wire',
+};
+
+const BUILDING_ICONS = {
+  'Assembler': 'assembler', 'Compounder': 'compounder', 'Fabricator': 'fabricator',
+  'Furnace': 'furnace', 'Helium-3 Extractor': 'helium_extractor', 'Mega Press': 'mega_press',
+  'Ore Extractor': 'ore_excavator', 'Refinery': 'refinery', 'Smelter': 'smelter',
+  'Sulfur Extractor': 'sulfur_extractor', 'Base Core': 'base_core',
+  'Storage': 'storage_depot_v1', 'Habitat (Small)': 'habitat',
+  'Solar Power Generator T1': 'solar_generator_v1', 'Solar Power Generator T2': 'solar_generator_v2',
+  'Wind Power Generator T1': 'wind_turbine_v1', 'Wind Power Generator T2': 'wind_turbine_v2',
+  'Turret T1': 'turret_v1', 'Turret T2': 'turret_v2',
+  'Package Sender': 'package_dispatcher', 'Package Receiver': 'package_receiver',
+  'Drone Merger (3-to-1)': 'drone_merger_3_to_1',
+};
+
+function itemIconHTML(name, cssClass) {
+  const icon = ITEM_ICONS[name];
+  if (!icon) return '';
+  const cls = cssClass ? `item-icon ${cssClass}` : 'item-icon';
+  return `<img class="${cls}" src="${ICON_BASE}/items/${icon}.png" alt="" loading="lazy" onerror="this.style.display='none'">`;
+}
+
+function buildingIconHTML(name, cssClass) {
+  const icon = BUILDING_ICONS[name];
+  if (!icon) return '';
+  const cls = cssClass ? `building-icon ${cssClass}` : 'building-icon';
+  return `<img class="${cls}" src="${ICON_BASE}/buildings/${icon}.png" alt="" loading="lazy" onerror="this.style.display='none'">`;
+}
+
+const BUILDING_COLOR_OVERRIDES = {
+  'Assembler': 'hsl(210, 65%, 55%)',
+  'Compounder': 'hsl(280, 65%, 55%)',
+  'Fabricator': 'hsl(35, 65%, 55%)'
+};
+
+function hashColor(name) {
+  if (BUILDING_COLOR_OVERRIDES[name]) return BUILDING_COLOR_OVERRIDES[name];
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = ((h << 5) - h) + name.charCodeAt(i) | 0;
+  const hue = Math.abs(h % 360);
+  const sat = 65;
+  const light = 55;
+  return `hsl(${hue}, ${sat}%, ${light}%)`;
+}
+
+// Match map.html world -> map pixel conversion model
+const LEGACY_MAP_MAX_COORD = 8192;
+const LEGACY_WORLD_SCALE_X = -224700 / 5300;
+const LEGACY_WORLD_SCALE_Y = -48700 / 6750;
+function worldToLegacyMap(worldX, worldY) {
+  return {
+    x: worldX / LEGACY_WORLD_SCALE_X,
+    y: worldY / LEGACY_WORLD_SCALE_Y
+  };
+}
+
+// ===== State =====
+let analysisData = null;
+let activeTab = 'buildings';
+let activeSaveName = null;
+
+// Per-tab state
+let buildingsSearch = '';
+let buildingsCollapsed = new Set();
+
+let productionSearch = '';
+let productionBuildingFilter = null;
+let productionSortField = 'name';
+let productionSortDir = 'asc';
+
+let storageSearch = '';
+let storageSortField = 'name';
+let storageSortDir = 'asc';
+
+let mapScale = 1;
+let mapTranslateX = 0;
+let mapTranslateY = 0;
+let mapDragStart = null;
+const MAP_DEFAULT_VISIBLE_CATEGORY = 'Crafting';
+let mapBuildingVisibility = {};
+let mapViewMode = 'buildings';
+let mapBackgroundEnabled = true;
+let mapBackgroundUrl = 'https://gamemappers.com/wp-content/uploads/tm7hrn.jpg';
+let mapBackgroundOpacity = 0.55;
+let mapBackgroundStatus = '';
+let mapBackgroundScale = 1;
+let mapBackgroundOffsetX = 0;
+let mapBackgroundOffsetY = 0;
+
+// ===== DOM Helpers =====
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => document.querySelectorAll(sel);
+
+function h(tag, attrs, ...children) {
+  const el = document.createElement(tag);
+  if (attrs) {
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k === 'className') el.className = v;
+      else if (k === 'onclick') el.addEventListener('click', v);
+      else if (k === 'oninput') el.addEventListener('input', v);
+      else if (k === 'onchange') el.addEventListener('change', v);
+      else if (k.startsWith('data')) el.setAttribute(k, v);
+      else el.setAttribute(k, v);
+    }
+  }
+  for (const child of children) {
+    if (child == null || child === false) continue;
+    if (typeof child === 'string' || typeof child === 'number') {
+      el.appendChild(document.createTextNode(String(child)));
+    } else if (Array.isArray(child)) {
+      child.forEach(c => { if (c) el.appendChild(c); });
+    } else {
+      el.appendChild(child);
+    }
+  }
+  return el;
+}
+
+function setHTML(parent, ...children) {
+  parent.innerHTML = '';
+  for (const child of children) {
+    if (child == null) continue;
+    if (typeof child === 'string') {
+      parent.innerHTML = child;
+    } else {
+      parent.appendChild(child);
+    }
+  }
+}
+
+// ===== Save File Parser (browser-side zlib via DecompressionStream) =====
+async function decompressData(compressedBytes) {
+  // Check for zlib header (0x78)
+  const isZlib = compressedBytes.length >= 2 && compressedBytes[0] === 0x78;
+  const format = isZlib ? 'deflate' : 'raw';
+
+  // Try DecompressionStream first (modern browsers)
+  if (typeof DecompressionStream !== 'undefined') {
+    try {
+      const ds = new DecompressionStream(format);
+      const writer = ds.writable.getWriter();
+      const reader = ds.readable.getReader();
+
+      writer.write(compressedBytes);
+      writer.close();
+
+      const chunks = [];
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+      }
+
+      const totalLen = chunks.reduce((s, c) => s + c.length, 0);
+      const result = new Uint8Array(totalLen);
+      let offset = 0;
+      for (const chunk of chunks) {
+        result.set(chunk, offset);
+        offset += chunk.length;
+      }
+      return new TextDecoder().decode(result);
+    } catch (e) {
+      // If 'raw' format failed, try 'deflate' as fallback
+      if (format === 'raw') {
+        try {
+          const ds2 = new DecompressionStream('deflate');
+          const writer2 = ds2.writable.getWriter();
+          const reader2 = ds2.readable.getReader();
+          writer2.write(compressedBytes);
+          writer2.close();
+          const chunks2 = [];
+          while (true) {
+            const { done, value } = await reader2.read();
+            if (done) break;
+            chunks2.push(value);
+          }
+          const totalLen2 = chunks2.reduce((s, c) => s + c.length, 0);
+          const result2 = new Uint8Array(totalLen2);
+          let off2 = 0;
+          for (const chunk of chunks2) { result2.set(chunk, off2); off2 += chunk.length; }
+          return new TextDecoder().decode(result2);
+        } catch (e2) {
+          throw new Error('Failed to decompress save file. The file may be corrupted.');
+        }
+      }
+      throw new Error('Failed to decompress save file. ' + e.message);
+    }
+  }
+
+  throw new Error('Your browser does not support DecompressionStream. Please use a modern browser (Chrome 80+, Edge 80+, Firefox 113+, Safari 16.4+).');
+}
+
+async function parseSaveFile(file) {
+  const buffer = await file.arrayBuffer();
+  const fileData = new Uint8Array(buffer);
+
+  if (fileData.length < 4) {
+    throw new Error('Save file is too small. Expected at least 4 bytes for the header.');
+  }
+
+  // Skip the first 4 bytes (JSON size header)
+  const compressedData = fileData.slice(4);
+  return decompressData(compressedData);
+}
+
+// ===== Analyzer (ported from server/analyzer.ts) =====
+function getJsonItems(parent, pathStr) {
+  const names = pathStr.split('/').filter(Boolean);
+  let result = parent;
+  for (const name of names) {
+    result = result[name];
+    if (!result) throw new Error(`Invalid path ${pathStr} at ${name}`);
+  }
+  return result;
+}
+
+function getSelectedRecipe(fragment) {
+  const i = fragment.indexOf('SelectedRecipe=');
+  if (i < 0) return null;
+  let sub = fragment.substring(i + 15);
+  if (!sub.startsWith('"')) return null;
+  const j = sub.indexOf('"', 1);
+  if (j < 0) return null;
+  sub = sub.substring(1, j);
+  const prefix = "/Script/Chimera.CrItemRecipeData'";
+  if (sub.startsWith(prefix)) {
+    sub = sub.substring(prefix.length, sub.length - 1);
+  }
+  return sub;
+}
+
+function extractItemIdentifier(itemDataBase) {
+  const prefix = '/Game/Chimera/Items/';
+  const idx = itemDataBase.indexOf(prefix);
+  if (idx < 0) return null;
+  let sub = itemDataBase.substring(idx + prefix.length);
+  const dotIdx = sub.indexOf('.');
+  if (dotIdx > 0) sub = sub.substring(0, dotIdx);
+  return sub;
+}
+
+function resolveItemName(itemId, itemNames) {
+  if (itemNames[itemId]) return itemNames[itemId];
+  let name = itemId;
+  if (name.startsWith('I_')) name = name.substring(2);
+  name = name.replace(/(?<!^)([A-Z])/g, ' $1');
+  return name;
+}
+
+// Extract world position from spawnData (Unreal may use Location, Transform.Translation, etc.)
+function extractPosition(spawnData) {
+  if (!spawnData || typeof spawnData !== 'object') return null;
+  function getVec(obj) {
+    if (!obj || typeof obj !== 'object') return null;
+    const parse = (v) => (typeof v === 'number' && !Number.isNaN(v)) ? v : (typeof v === 'string' ? Number(v) : NaN);
+    const x = parse(obj.x ?? obj.X);
+    const y = parse(obj.y ?? obj.Y);
+    const z = parse(obj.z ?? obj.Z);
+    if (Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(z)) return null;
+    return { x, y, z };
+  }
+  const loc = getVec(spawnData.location) ?? getVec(spawnData.Location) ?? getVec(spawnData.position) ?? getVec(spawnData.Position) ?? getVec(spawnData.relativeLocation) ?? getVec(spawnData.RelativeLocation);
+  if (loc) return loc;
+  const trans = spawnData.transform ?? spawnData.Transform;
+  if (trans && typeof trans === 'object') {
+    const transLoc = getVec(trans.translation ?? trans.Translation ?? trans.location ?? trans.Location);
+    if (transLoc) return transLoc;
+  }
+  return null;
+}
+
+// Extract custom/display name from entity (spawnData or fragmentValues)
+function extractDisplayName(entityValue, spawnData) {
+  if (!entityValue || typeof entityValue !== 'object') return null;
+  const str = (v) => (v != null && typeof v === 'string' && v.trim().length > 0) ? v.trim() : null;
+  const fromObj = (obj, keys) => {
+    if (!obj || typeof obj !== 'object') return null;
+    for (const key of keys) {
+      const v = obj[key];
+      if (str(v)) return v;
+    }
+    return null;
+  };
+  let name = fromObj(spawnData, ['displayName', 'DisplayName', 'customName', 'CustomName', 'label', 'Label', 'buildingName', 'BuildingName', 'friendlyName', 'FriendlyName']);
+  if (name) return name;
+  const fragmentValues = entityValue['fragmentValues'];
+  if (Array.isArray(fragmentValues)) {
+    const keys = 'DisplayName|CustomName|Label|BuildingName|FriendlyName|ReceiverName|StationName|CustomLabel|EntityName';
+    for (const fv of fragmentValues) {
+      const s = String(fv);
+      let m = s.match(new RegExp('(?:' + keys + ')=["\']([^"\']+)["\']', 'i'));
+      if (!m) m = s.match(new RegExp('(?:' + keys + ')=([^\\s)\\]",]+)', 'i'));
+      if (m && m[1]) {
+        const val = m[1].trim();
+        if (val.length > 0 && !val.startsWith('/') && !val.startsWith('Script')) return val;
+      }
+    }
+  }
+  return null;
+}
+
+// Extract scale or size from spawnData (Unreal may use Scale, Scale3D, transform.Scale, or Bounds)
+function extractScale(spawnData) {
+  if (!spawnData || typeof spawnData !== 'object') return null;
+  function getVec(obj) {
+    if (obj == null) return null;
+    const parse = (v) => (typeof v === 'number' && !Number.isNaN(v)) ? v : (typeof v === 'string' ? Number(v) : NaN);
+    if (typeof obj === 'number') {
+      const s = parse(obj);
+      if (Number.isNaN(s) || s <= 0) return null;
+      return { x: s, y: s, z: s };
+    }
+    if (Array.isArray(obj) && obj.length >= 2) {
+      const x = parse(obj[0]);
+      const y = parse(obj[1]);
+      const z = obj.length >= 3 ? parse(obj[2]) : (Number.isNaN(x) ? NaN : x);
+      if (Number.isNaN(x) && Number.isNaN(y) && Number.isNaN(z)) return null;
+      return { x: Number.isNaN(x) ? 1 : x, y: Number.isNaN(y) ? 1 : y, z: Number.isNaN(z) ? 1 : z };
+    }
+    if (typeof obj !== 'object') return null;
+    const x = parse(obj.x ?? obj.X);
+    const y = parse(obj.y ?? obj.Y);
+    const z = parse(obj.z ?? obj.Z);
+    if (Number.isNaN(x) && Number.isNaN(y) && Number.isNaN(z)) return null;
+    const sx = Number.isNaN(x) ? 1 : x;
+    const sy = Number.isNaN(y) ? 1 : y;
+    const sz = Number.isNaN(z) ? 1 : z;
+    return { x: sx, y: sy, z: sz };
+  }
+  const scale = getVec(spawnData.scale) ?? getVec(spawnData.Scale) ?? getVec(spawnData.scale3D) ?? getVec(spawnData.Scale3D)
+    ?? getVec(spawnData.relativeScale) ?? getVec(spawnData.RelativeScale) ?? getVec(spawnData.drawScale) ?? getVec(spawnData.DrawScale)
+    ?? getVec(spawnData.drawScale3D) ?? getVec(spawnData.DrawScale3D);
+  if (scale) return scale;
+  const trans = spawnData.transform ?? spawnData.Transform;
+  if (trans && typeof trans === 'object') {
+    const transScale = getVec(trans.scale ?? trans.Scale ?? trans.scale3D ?? trans.Scale3D);
+    if (transScale) return transScale;
+  }
+  // Bounds: BoxExtent or extent gives half-size; use 2*extent as scale proxy for map size
+  const bounds = spawnData.bounds ?? spawnData.Bounds ?? spawnData.boundingBox ?? spawnData.BoundingBox;
+  if (bounds && typeof bounds === 'object') {
+    const ext = getVec(bounds.boxExtent ?? bounds.BoxExtent ?? bounds.extent ?? bounds.Extent ?? bounds.halfSize ?? bounds.HalfSize);
+    if (ext && (ext.x > 0 || ext.y > 0 || ext.z > 0)) return { x: ext.x * 2, y: ext.y * 2, z: ext.z * 2 };
+  }
+  return null;
+}
+
+const ITEM_DATA_REGEX = /ItemDataBase="([^"]+)"[^)]*?Count=(\d+)/g;
+
+function parseStoredItems(fragmentValues, storage, itemNames) {
+  for (const fragmentValue of fragmentValues) {
+    const f = String(fragmentValue);
+    ITEM_DATA_REGEX.lastIndex = 0;
+    let match;
+    while ((match = ITEM_DATA_REGEX.exec(f)) !== null) {
+      const itemDataBase = match[1];
+      const count = parseInt(match[2], 10);
+      if (count <= 0) continue;
+      const itemId = extractItemIdentifier(itemDataBase);
+      if (!itemId) continue;
+      const displayName = resolveItemName(itemId, itemNames);
+      storage.set(displayName, (storage.get(displayName) || 0) + count);
+    }
+  }
+}
+
+function analyze(jsonContent) {
+  const data = ITEMS_DATA;
+
+  const buildingsByInternal = new Map();
+  for (const b of data.Buildings) buildingsByInternal.set(b.InternalName, b);
+
+  const itemsByInternal = new Map();
+  for (const item of data.Items) itemsByInternal.set(item.InternalName, item);
+
+  const root = JSON.parse(jsonContent);
+  const entities = getJsonItems(root, 'itemData/Mass/entities');
+
+  let customNamesMap = null;
+  try {
+    customNamesMap = getJsonItems(root, 'itemData/CrBuildingCustomNameSubsystem/customNames');
+  } catch (_) {}
+
+  const counts = new Map();
+  for (const b of data.Buildings) counts.set(b.Name, 0);
+
+  const production = new Map();
+  const storage = new Map();
+  const buildingPositions = [];
+  let spawnDataKeysLogged = 0;
+
+  for (const [entityIdKey, entityValue] of Object.entries(entities)) {
+    if (!entityValue) continue;
+    let spawnData;
+    try { spawnData = getJsonItems(entityValue, 'spawnData'); } catch { continue; }
+    if (typeof spawnData === 'string') {
+      try { spawnData = JSON.parse(spawnData); } catch { continue; }
+    }
+    if (spawnDataKeysLogged < 2 && spawnData && typeof spawnData === 'object') {
+      const keys = Object.keys(spawnData);
+      const transform = spawnData.transform ?? spawnData.Transform;
+      const transformKeys = transform && typeof transform === 'object' ? Object.keys(transform) : [];
+      console.log('[Save map] spawnData keys (sample):', keys);
+      if (transformKeys.length) console.log('[Save map] spawnData.transform keys:', transformKeys);
+      const bounds = spawnData.bounds ?? spawnData.Bounds;
+      if (bounds && typeof bounds === 'object') console.log('[Save map] spawnData.bounds keys:', Object.keys(bounds));
+      spawnDataKeysLogged++;
+    }
+
+    const entityConfigDataPath = String(spawnData['entityConfigDataPath'] || '');
+    const buildingDef = buildingsByInternal.get(entityConfigDataPath);
+    if (!buildingDef) continue;
+
+    counts.set(buildingDef.Name, (counts.get(buildingDef.Name) || 0) + 1);
+
+    const pos = extractPosition(spawnData);
+    const category = buildingDef.Category || 'Other';
+    const fragmentValues = entityValue['fragmentValues'];
+
+    if (pos) {
+      const mapped = worldToLegacyMap(pos.x, pos.y);
+      const scaleVec = extractScale(spawnData);
+      const scaleX = scaleVec ? scaleVec.x : 1;
+      const scaleY = scaleVec ? scaleVec.y : 1;
+      let displayName = null;
+      if (customNamesMap && entityIdKey != null && String(entityIdKey).length > 0) {
+        const custom = customNamesMap[entityIdKey] ?? customNamesMap['(ID=' + entityIdKey + ')'];
+        if (typeof custom === 'string' && custom.trim().length > 0) displayName = custom.trim();
+      }
+      if (!displayName) displayName = extractDisplayName(entityValue, spawnData);
+      let producedItem = null;
+      let perMinute = 0;
+      if (!buildingDef.IsStorage && Array.isArray(fragmentValues)) {
+        for (const fragmentValue of fragmentValues) {
+          const f = String(fragmentValue);
+          if (f.startsWith('/Script/Chimera.CrCraftingFragment')) {
+            const recipe = getSelectedRecipe(f);
+            if (!recipe) continue;
+            const itemDef = itemsByInternal.get(recipe);
+            if (!itemDef) continue;
+            let itemName = itemDef.ItemName;
+            const parenIdx = itemName.indexOf('(');
+            if (parenIdx > 0) itemName = itemName.substring(0, parenIdx).trim();
+            producedItem = itemName;
+            perMinute = itemDef.AmountProduced > 0 && itemDef.Seconds > 0
+              ? itemDef.AmountProduced * (60 / itemDef.Seconds) : 0;
+            break;
+          }
+        }
+      }
+      buildingPositions.push({
+        name: buildingDef.Name,
+        category,
+        x: pos.x, y: pos.y, z: pos.z,
+        mapX: mapped.x, mapY: mapped.y,
+        scaleX, scaleY,
+        displayName: displayName || undefined,
+        producedItem: producedItem || undefined,
+        perMinute: perMinute || undefined
+      });
+    }
+
+    if (!fragmentValues) continue;
+
+    if (buildingDef.IsStorage) {
+      parseStoredItems(fragmentValues, storage, data.ItemNames);
+    } else {
+      for (const fragmentValue of fragmentValues) {
+        const f = String(fragmentValue);
+        if (f.startsWith('/Script/Chimera.CrCraftingFragment')) {
+          const recipe = getSelectedRecipe(f);
+          if (!recipe) continue;
+          const itemDef = itemsByInternal.get(recipe);
+          if (!itemDef) continue;
+          let displayName = itemDef.ItemName;
+          const parenIdx = displayName.indexOf('(');
+          if (parenIdx > 0) displayName = displayName.substring(0, parenIdx).trim();
+          const perMinute = itemDef.AmountProduced > 0 && itemDef.Seconds > 0
+            ? itemDef.AmountProduced * (60 / itemDef.Seconds) : 0;
+          if (perMinute > 0) {
+            const existing = production.get(displayName);
+            if (existing) { existing.perMinute += perMinute; }
+            else { production.set(displayName, { perMinute, buildingName: itemDef.BuildingName }); }
+          }
+        }
+      }
+    }
+  }
+
+  // Normalize scale so bounds-based sizes (world units) don't all hit max clamp
+  let maxS = 0;
+  for (const p of buildingPositions) {
+    const s = Math.max(p.scaleX ?? 1, p.scaleY ?? 1);
+    if (s > maxS) maxS = s;
+  }
+  if (maxS > 2) {
+    for (const p of buildingPositions) {
+      p.scaleX = (p.scaleX ?? 1) / (maxS / 2);
+      p.scaleY = (p.scaleY ?? 1) / (maxS / 2);
+    }
+  }
+
+  // Group by category
+  const categoryMap = new Map();
+  for (const b of data.Buildings) {
+    const count = counts.get(b.Name) || 0;
+    if (count === 0) continue;
+    const category = b.Category || 'Other';
+    if (!categoryMap.has(category)) categoryMap.set(category, []);
+    categoryMap.get(category).push({ name: b.Name, count });
+  }
+
+  const buildingCategories = [];
+  const usedCategories = new Set();
+  for (const cat of CATEGORY_ORDER) {
+    const buildings = categoryMap.get(cat);
+    if (!buildings) continue;
+    usedCategories.add(cat);
+    buildings.sort((a, b) => a.name.localeCompare(b.name));
+    buildingCategories.push({
+      category: cat, buildings,
+      total: buildings.reduce((sum, b) => sum + b.count, 0)
+    });
+  }
+  for (const [cat, buildings] of categoryMap) {
+    if (usedCategories.has(cat)) continue;
+    buildings.sort((a, b) => a.name.localeCompare(b.name));
+    buildingCategories.push({
+      category: cat, buildings,
+      total: buildings.reduce((sum, b) => sum + b.count, 0)
+    });
+  }
+
+  const productionArr = [];
+  for (const [name, d] of production) {
+    productionArr.push({ name, perMinute: Math.round(d.perMinute * 100) / 100, buildingName: d.buildingName });
+  }
+  productionArr.sort((a, b) => a.name.localeCompare(b.name));
+
+  const storageArr = [];
+  for (const [name, count] of storage) storageArr.push({ name, count });
+  storageArr.sort((a, b) => a.name.localeCompare(b.name));
+
+  let totalBuildings = 0;
+  for (const cat of buildingCategories) totalBuildings += cat.total;
+  let totalStoredItems = 0;
+  for (const item of storageArr) totalStoredItems += item.count;
+
+  return {
+    buildingCategories, production: productionArr, storage: storageArr,
+    buildingPositions,
+    totals: { buildings: totalBuildings, productionItems: productionArr.length, storedItems: totalStoredItems }
+  };
+}
+
+// ===== UI Rendering =====
+
+function renderPickerView() {
+  const main = $('#mainContent');
+  const container = h('div', { className: 'picker-container' },
+    h('svg', null), // placeholder, replaced below
+    h('div', { className: 'picker-title' }, 'Star Rupture Save Analyzer'),
+    h('div', { className: 'picker-subtitle' },
+      'Open a .sav file from your Star Rupture save folder to analyze buildings, production rates, and storage.'
+    ),
+    h('div', { className: 'file-input-wrapper' },
+      h('button', { className: 'file-btn' },
+        h('svg', null),
+        'Open .sav File'
+      ),
+      h('input', { type: 'file', accept: '.sav', onchange: handleFileSelect })
+    ),
+    h('div', { className: 'drop-hint' }, 'or drag & drop a .sav file anywhere on this page')
+  );
+
+  // Set the folder icon SVG
+  container.children[0].outerHTML = `<svg class="picker-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>`;
+
+  // Set the upload icon in button
+  const btn = container.querySelector('.file-btn');
+  const btnSvg = btn.querySelector('svg');
+  btnSvg.outerHTML = `<svg style="width:1.25rem;height:1.25rem" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>`;
+
+  setHTML(main, container);
+}
+
+function renderAnalysisView() {
+  const data = analysisData;
+  const main = $('#mainContent');
+  main.innerHTML = '';
+
+  // Summary cards
+  const hasMap = data.buildingPositions && data.buildingPositions.length > 0;
+  const grid = h('div', { className: hasMap ? 'summary-grid summary-grid-with-map' : 'summary-grid' },
+    h('div', { className: 'summary-card', onclick: () => switchTab('buildings') },
+      h('div', { className: 'summary-label' }, 'Total Buildings'),
+      h('div', { className: 'summary-value color-blue' }, data.totals.buildings.toLocaleString()),
+      h('div', { className: 'summary-sub' }, `${data.buildingCategories.length} categories`)
+    ),
+    h('div', { className: 'summary-card', onclick: () => switchTab('production') },
+      h('div', { className: 'summary-label' }, 'Production Items'),
+      h('div', { className: 'summary-value color-green' }, String(data.totals.productionItems)),
+      h('div', { className: 'summary-sub' }, 'active recipes')
+    ),
+    h('div', { className: 'summary-card', onclick: () => switchTab('storage') },
+      h('div', { className: 'summary-label' }, 'Stored Items'),
+      h('div', { className: 'summary-value color-amber' }, data.totals.storedItems.toLocaleString()),
+      h('div', { className: 'summary-sub' }, `${data.storage.length} types`)
+    )
+  );
+  if (data.buildingPositions && data.buildingPositions.length > 0) {
+    grid.appendChild(h('div', { className: 'summary-card', onclick: () => switchTab('map') },
+      h('div', { className: 'summary-label' }, 'Map'),
+      h('div', { className: 'summary-value', style: 'color:#8b5cf6' }, data.buildingPositions.length.toLocaleString()),
+      h('div', { className: 'summary-sub' }, 'building locations')
+    ));
+  }
+  main.appendChild(grid);
+
+  // Tab content container
+  const tabContent = h('div', { id: 'tabContent' });
+  main.appendChild(tabContent);
+
+  renderTabs();
+  renderTabContent();
+}
+
+function renderTabs() {
+  const data = analysisData;
+  if (!data) return;
+
+  const nav = $('#tabsNav');
+  nav.innerHTML = '';
+
+  const tabs = [
+    { id: 'buildings', label: 'Buildings', count: data.totals.buildings },
+    { id: 'production', label: 'Production', count: data.totals.productionItems },
+    { id: 'storage', label: 'Storage', count: data.storage.length },
+  ];
+  if (data.buildingPositions && data.buildingPositions.length > 0) {
+    tabs.push({ id: 'map', label: 'Map', count: data.buildingPositions.length });
+  }
+
+  for (const tab of tabs) {
+    const btn = h('button', {
+      className: `tab-btn ${activeTab === tab.id ? 'active' : ''}`,
+      onclick: () => switchTab(tab.id)
+    },
+      tab.label,
+      h('span', { className: 'tab-badge' }, tab.count.toLocaleString())
+    );
+    nav.appendChild(btn);
+  }
+}
+
+function switchTab(tabId) {
+  activeTab = tabId;
+  renderTabs();
+  renderTabContent();
+}
+
+function renderTabContent() {
+  const container = document.getElementById('tabContent');
+  if (!container) return;
+  container.innerHTML = '';
+
+  if (activeTab === 'buildings') renderBuildingsTab(container);
+  else if (activeTab === 'production') renderProductionTab(container);
+  else if (activeTab === 'storage') renderStorageTab(container);
+  else if (activeTab === 'map') renderMapTab(container);
+}
+
+// ===== Buildings Tab =====
+function renderBuildingsTab(container) {
+  const data = analysisData;
+  const categories = data.buildingCategories;
+
+  const filtered = categories
+    .map(cat => ({
+      ...cat,
+      buildings: cat.buildings.filter(b =>
+        b.name.toLowerCase().includes(buildingsSearch.toLowerCase())
+      )
+    }))
+    .filter(cat => cat.buildings.length > 0);
+
+  const filteredTotal = filtered.reduce((sum, cat) =>
+    sum + cat.buildings.reduce((s, b) => s + b.count, 0), 0);
+
+  // Toolbar
+  const toolbar = h('div', { className: 'toolbar' },
+    createSearchBar(buildingsSearch, val => { buildingsSearch = val; renderTabContent(); }, 'Search buildings...'),
+    h('div', { className: 'toolbar-stats' },
+      h('span', { className: 'stat-value color-blue' }, filteredTotal.toLocaleString()),
+      ' total buildings',
+      buildingsSearch ? ` (${data.totals.buildings.toLocaleString()} unfiltered)` : ''
+    )
+  );
+  container.appendChild(toolbar);
+
+  // Categories
+  const list = h('div', { className: 'space-y' });
+  for (const cat of filtered) {
+    const isCollapsed = buildingsCollapsed.has(cat.category);
+    const catTotal = cat.buildings.reduce((s, b) => s + b.count, 0);
+
+    const panel = h('div', { className: 'panel' });
+
+    const header = document.createElement('button');
+    header.className = 'cat-header';
+    header.innerHTML = `
+      <div class="cat-header-left">
+        <svg class="${isCollapsed ? '' : 'open'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+        </svg>
+        <span class="cat-name">${esc(cat.category)}</span>
+      </div>
+      <span class="cat-stats">
+        ${cat.buildings.length} type${cat.buildings.length !== 1 ? 's' : ''} &middot;
+        <span class="cat-placed">${catTotal.toLocaleString()}</span> placed
+      </span>`;
+    header.addEventListener('click', () => {
+      if (buildingsCollapsed.has(cat.category)) buildingsCollapsed.delete(cat.category);
+      else buildingsCollapsed.add(cat.category);
+      renderTabContent();
+    });
+    panel.appendChild(header);
+
+    if (!isCollapsed) {
+      const body = h('div', { className: 'cat-body' });
+      const table = document.createElement('table');
+      const tbody = document.createElement('tbody');
+      for (const b of cat.buildings) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td class="left indent" style="color:var(--gray-200)"><span class="name-with-icon">${buildingIconHTML(b.name, 'small')}${esc(b.name)}</span></td>
+          <td class="right mono" style="color:var(--gray-300)">${b.count.toLocaleString()}</td>`;
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      body.appendChild(table);
+      panel.appendChild(body);
+    }
+
+    list.appendChild(panel);
+  }
+  container.appendChild(list);
+}
+
+// ===== Production Tab =====
+function renderProductionTab(container) {
+  const items = analysisData.production;
+
+  // Get unique building names
+  const buildingNames = [...new Set(items.map(i => i.buildingName))].sort();
+
+  let filtered = items;
+  if (productionSearch) {
+    const q = productionSearch.toLowerCase();
+    filtered = filtered.filter(i =>
+      i.name.toLowerCase().includes(q) || i.buildingName.toLowerCase().includes(q));
+  }
+  if (productionBuildingFilter) {
+    filtered = filtered.filter(i => i.buildingName === productionBuildingFilter);
+  }
+
+  filtered = [...filtered].sort((a, b) => {
+    let cmp;
+    if (productionSortField === 'name') cmp = a.name.localeCompare(b.name);
+    else if (productionSortField === 'perMinute') cmp = a.perMinute - b.perMinute;
+    else cmp = a.buildingName.localeCompare(b.buildingName);
+    return productionSortDir === 'asc' ? cmp : -cmp;
+  });
+
+  const totalRate = filtered.reduce((sum, i) => sum + i.perMinute, 0);
+
+  // Toolbar
+  const toolbar = h('div', { className: 'toolbar' },
+    createSearchBar(productionSearch, val => { productionSearch = val; renderTabContent(); }, 'Search items...'),
+    h('div', { className: 'toolbar-stats' },
+      h('span', { className: 'stat-value color-green' }, String(filtered.length)),
+      ' items \u00B7 ',
+      h('span', { style: 'color:var(--gray-200)' }, totalRate.toLocaleString()),
+      ' total/min'
+    )
+  );
+  container.appendChild(toolbar);
+
+  // Filter pills
+  const pills = h('div', { className: 'filter-pills' });
+  const allPill = h('button', {
+    className: `pill ${!productionBuildingFilter ? 'active' : ''}`,
+    onclick: () => { productionBuildingFilter = null; renderTabContent(); }
+  }, 'All');
+  pills.appendChild(allPill);
+  for (const name of buildingNames) {
+    const pill = document.createElement('button');
+    pill.className = `pill ${productionBuildingFilter === name ? 'active' : ''}`;
+    pill.innerHTML = `${buildingIconHTML(name)}${esc(name)}`;
+    pill.addEventListener('click', () => {
+      productionBuildingFilter = productionBuildingFilter === name ? null : name;
+      renderTabContent();
+    });
+    pills.appendChild(pill);
+  }
+  container.appendChild(pills);
+
+  // Table
+  const panel = h('div', { className: 'panel' });
+  const table = document.createElement('table');
+
+  const thead = document.createElement('thead');
+  const headerRow = document.createElement('tr');
+  headerRow.innerHTML = `
+    <th class="left" data-field="name">Item ${sortIconHTML('name', productionSortField, productionSortDir)}</th>
+    <th class="right" data-field="perMinute">Rate / min ${sortIconHTML('perMinute', productionSortField, productionSortDir)}</th>
+    <th class="right" data-field="buildingName">Building ${sortIconHTML('buildingName', productionSortField, productionSortDir)}</th>`;
+  headerRow.querySelectorAll('th').forEach(th => {
+    th.addEventListener('click', () => {
+      const field = th.dataset.field;
+      if (productionSortField === field) {
+        productionSortDir = productionSortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        productionSortField = field;
+        productionSortDir = field === 'perMinute' ? 'desc' : 'asc';
+      }
+      renderTabContent();
+    });
+  });
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  tbody.className = 'divide';
+  for (const item of filtered) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="left" style="color:var(--gray-100);font-weight:500"><span class="name-with-icon">${itemIconHTML(item.name)}${esc(item.name)}</span></td>
+      <td class="right mono color-green">${item.perMinute.toLocaleString()}</td>
+      <td class="right" style="color:var(--gray-400);font-size:0.875rem"><span class="name-with-icon" style="justify-content:flex-end">${buildingIconHTML(item.buildingName, 'small')}${esc(item.buildingName)}</span></td>`;
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  panel.appendChild(table);
+
+  if (filtered.length === 0) {
+    panel.appendChild(h('div', { className: 'empty-msg' }, 'No items match your search'));
+  }
+
+  container.appendChild(panel);
+}
+
+// ===== Storage Tab =====
+function renderStorageTab(container) {
+  const items = analysisData.storage;
+  const totalStored = analysisData.totals.storedItems;
+
+  let filtered = items;
+  if (storageSearch) {
+    const q = storageSearch.toLowerCase();
+    filtered = filtered.filter(i => i.name.toLowerCase().includes(q));
+  }
+
+  filtered = [...filtered].sort((a, b) => {
+    let cmp;
+    if (storageSortField === 'name') cmp = a.name.localeCompare(b.name);
+    else cmp = a.count - b.count;
+    return storageSortDir === 'asc' ? cmp : -cmp;
+  });
+
+  const filteredTotal = filtered.reduce((sum, i) => sum + i.count, 0);
+
+  // Toolbar
+  const toolbar = h('div', { className: 'toolbar' },
+    createSearchBar(storageSearch, val => { storageSearch = val; renderTabContent(); }, 'Search stored items...'),
+    h('div', { className: 'toolbar-stats' },
+      h('span', { className: 'stat-value color-amber' }, String(filtered.length)),
+      ' types \u00B7 ',
+      h('span', { style: 'color:var(--gray-200)' }, filteredTotal.toLocaleString()),
+      ' total items',
+      storageSearch ? ` (${totalStored.toLocaleString()} unfiltered)` : ''
+    )
+  );
+  container.appendChild(toolbar);
+
+  // Table
+  const panel = h('div', { className: 'panel' });
+  const table = document.createElement('table');
+
+  const thead = document.createElement('thead');
+  const headerRow = document.createElement('tr');
+  headerRow.innerHTML = `
+    <th class="left" data-field="name">Item ${sortIconHTML('name', storageSortField, storageSortDir)}</th>
+    <th class="right" data-field="count">Quantity ${sortIconHTML('count', storageSortField, storageSortDir)}</th>`;
+  headerRow.querySelectorAll('th').forEach(th => {
+    th.addEventListener('click', () => {
+      const field = th.dataset.field;
+      if (storageSortField === field) {
+        storageSortDir = storageSortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        storageSortField = field;
+        storageSortDir = field === 'count' ? 'desc' : 'asc';
+      }
+      renderTabContent();
+    });
+  });
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  tbody.className = 'divide';
+  for (const item of filtered) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="left" style="color:var(--gray-100);font-weight:500"><span class="name-with-icon">${itemIconHTML(item.name)}${esc(item.name)}</span></td>
+      <td class="right mono color-amber">${item.count.toLocaleString()}</td>`;
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  panel.appendChild(table);
+
+  if (filtered.length === 0) {
+    panel.appendChild(h('div', { className: 'empty-msg' }, 'No items match your search'));
+  }
+
+  container.appendChild(panel);
+}
+
+// ===== Map Tab =====
+function renderMapTab(container) {
+  const positions = analysisData.buildingPositions || [];
+  mapScale = 1;
+  mapTranslateX = 0;
+  mapTranslateY = 0;
+  if (positions.length === 0) {
+    container.appendChild(h('div', { className: 'empty-msg' }, 'No building location data in this save.'));
+    return;
+  }
+
+  // Use map.html conversion model so map backgrounds can align correctly.
+  const points = positions.map(p => {
+    const mapped = worldToLegacyMap(p.x, p.y);
+    const px = mapped.x;
+    const py = mapped.y;
+    return { ...p, plotX: px, plotY: py };
+  });
+  const xs = points.map(p => p.plotX).filter(Number.isFinite);
+  const ys = points.map(p => p.plotY).filter(Number.isFinite);
+  if (xs.length === 0 || ys.length === 0) {
+    container.appendChild(h('div', { className: 'empty-msg' }, 'No usable map coordinates in this save.'));
+    return;
+  }
+  const usingFixedMapSpace = !!mapBackgroundEnabled;
+  const vbMinX = usingFixedMapSpace ? 0 : Math.min(...xs) - 50;
+  const vbMinY = usingFixedMapSpace ? 0 : Math.min(...ys) - 50;
+  const vbW = usingFixedMapSpace ? LEGACY_MAP_MAX_COORD : (Math.max(...xs) - Math.min(...xs) + 100 || 100);
+  const vbH = usingFixedMapSpace ? LEGACY_MAP_MAX_COORD : (Math.max(...ys) - Math.min(...ys) + 100 || 100);
+  function applyBackgroundCalibration() {
+    const bgCalib = document.getElementById('mapBackgroundCalib');
+    if (!bgCalib) return;
+    bgCalib.setAttribute(
+      'transform',
+      `translate(${mapBackgroundOffsetX},${mapBackgroundOffsetY}) scale(${mapBackgroundScale})`
+    );
+  }
+
+  const layout = h('div', { className: 'map-layout' });
+
+  const wrapper = h('div', { className: 'map-wrapper' });
+  const toolbar = h('div', { className: 'map-toolbar' });
+  const viewModeLabel = document.createElement('span');
+  viewModeLabel.className = 'map-toolbar-label';
+  viewModeLabel.textContent = 'View:';
+  toolbar.appendChild(viewModeLabel);
+  const buildingsRadio = document.createElement('input');
+  buildingsRadio.type = 'radio';
+  buildingsRadio.name = 'mapViewMode';
+  buildingsRadio.id = 'mapModeBuildings';
+  buildingsRadio.value = 'buildings';
+  buildingsRadio.checked = mapViewMode === 'buildings';
+  buildingsRadio.addEventListener('change', () => { mapViewMode = 'buildings'; renderTabContent(); });
+  const buildingsLabel = document.createElement('label');
+  buildingsLabel.htmlFor = 'mapModeBuildings';
+  buildingsLabel.textContent = 'Buildings';
+  toolbar.appendChild(buildingsRadio);
+  toolbar.appendChild(buildingsLabel);
+  const productionRadio = document.createElement('input');
+  productionRadio.type = 'radio';
+  productionRadio.name = 'mapViewMode';
+  productionRadio.id = 'mapModeProduction';
+  productionRadio.value = 'production';
+  productionRadio.checked = mapViewMode === 'production';
+  productionRadio.addEventListener('change', () => { mapViewMode = 'production'; renderTabContent(); });
+  const productionLabel = document.createElement('label');
+  productionLabel.htmlFor = 'mapModeProduction';
+  productionLabel.textContent = 'Production';
+  toolbar.appendChild(productionRadio);
+  toolbar.appendChild(productionLabel);
+  const resetBtn = document.createElement('button');
+  resetBtn.textContent = 'Reset view';
+  resetBtn.addEventListener('click', () => {
+    mapScale = 1;
+    mapTranslateX = 0;
+    mapTranslateY = 0;
+    renderTabContent();
+  });
+  toolbar.appendChild(resetBtn);
+
+  toolbar.appendChild(h('div', { className: 'map-toolbar-sep' }));
+
+  const bgToggle = document.createElement('label');
+  bgToggle.className = 'map-bg-toggle';
+  const bgToggleInput = document.createElement('input');
+  bgToggleInput.type = 'checkbox';
+  bgToggleInput.checked = mapBackgroundEnabled;
+  bgToggleInput.addEventListener('change', () => {
+    mapBackgroundEnabled = bgToggleInput.checked;
+    renderTabContent();
+  });
+  bgToggle.appendChild(bgToggleInput);
+  bgToggle.appendChild(document.createTextNode('Background'));
+  toolbar.appendChild(bgToggle);
+
+  const bgUrlInput = document.createElement('input');
+  bgUrlInput.type = 'text';
+  bgUrlInput.className = 'map-bg-url';
+  bgUrlInput.placeholder = 'Background image URL or local path';
+  bgUrlInput.value = mapBackgroundUrl;
+  bgUrlInput.title = 'Paste an image URL or local file path to use as map background';
+  toolbar.appendChild(bgUrlInput);
+
+  const applyBgBtn = document.createElement('button');
+  applyBgBtn.textContent = 'Apply';
+  applyBgBtn.addEventListener('click', () => {
+    mapBackgroundUrl = bgUrlInput.value.trim();
+    mapBackgroundStatus = '';
+    renderTabContent();
+  });
+  toolbar.appendChild(applyBgBtn);
+
+  const presetBgBtn = document.createElement('button');
+  presetBgBtn.textContent = 'Try SR Preset';
+  presetBgBtn.title = 'Try known StarRupture map background URLs';
+  presetBgBtn.addEventListener('click', () => {
+    const candidates = [
+      'https://gamemappers.com/wp-content/uploads/tm7hrn.jpg',
+      'https://starrupture.tools/images/map.webp',
+      'https://starrupture.tools/images/map.png',
+      'https://starrupture.tools/map.webp',
+      'https://starrupture.tools/map.png'
+    ];
+    mapBackgroundStatus = 'Trying StarRupture presets...';
+    renderTabContent();
+    const tryIndex = (idx) => {
+      if (idx >= candidates.length) {
+        mapBackgroundStatus = 'Could not load StarRupture preset image';
+        renderTabContent();
+        return;
+      }
+      const testImg = new Image();
+      testImg.onload = () => {
+        mapBackgroundUrl = candidates[idx];
+        mapBackgroundEnabled = true;
+        mapBackgroundStatus = 'Loaded StarRupture preset';
+        renderTabContent();
+      };
+      testImg.onerror = () => tryIndex(idx + 1);
+      testImg.src = candidates[idx];
+    };
+    tryIndex(0);
+  });
+  toolbar.appendChild(presetBgBtn);
+
+  bgUrlInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      applyBgBtn.click();
+    }
+  });
+
+  const bgFileInput = document.createElement('input');
+  bgFileInput.type = 'file';
+  bgFileInput.accept = 'image/*';
+  bgFileInput.style.display = 'none';
+  bgFileInput.addEventListener('change', () => {
+    const file = bgFileInput.files && bgFileInput.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      mapBackgroundUrl = String(reader.result || '');
+      mapBackgroundEnabled = true;
+      mapBackgroundStatus = `Loaded ${file.name}`;
+      renderTabContent();
+    };
+    reader.onerror = () => {
+      mapBackgroundStatus = 'Failed to load selected image file';
+      renderTabContent();
+    };
+    reader.readAsDataURL(file);
+  });
+  const fileBtn = document.createElement('button');
+  fileBtn.textContent = 'Load Image';
+  fileBtn.addEventListener('click', () => bgFileInput.click());
+  toolbar.appendChild(fileBtn);
+  toolbar.appendChild(bgFileInput);
+
+  const bgOpacityWrap = document.createElement('label');
+  bgOpacityWrap.className = 'map-bg-opacity';
+  bgOpacityWrap.appendChild(document.createTextNode('Opacity'));
+  const bgOpacityInput = document.createElement('input');
+  bgOpacityInput.type = 'range';
+  bgOpacityInput.min = '5';
+  bgOpacityInput.max = '100';
+  bgOpacityInput.step = '1';
+  bgOpacityInput.value = String(Math.round(mapBackgroundOpacity * 100));
+  bgOpacityInput.addEventListener('input', () => {
+    mapBackgroundOpacity = Math.max(0.05, Math.min(1, Number(bgOpacityInput.value) / 100));
+    const imageEl = document.getElementById('mapBackgroundImage');
+    if (imageEl) imageEl.setAttribute('opacity', String(mapBackgroundOpacity));
+  });
+  bgOpacityWrap.appendChild(bgOpacityInput);
+  toolbar.appendChild(bgOpacityWrap);
+
+  const bgScaleWrap = document.createElement('label');
+  bgScaleWrap.className = 'map-bg-adjust';
+  bgScaleWrap.appendChild(document.createTextNode('Scale'));
+  const bgScaleInput = document.createElement('input');
+  bgScaleInput.type = 'number';
+  bgScaleInput.step = '0.01';
+  bgScaleInput.min = '0.1';
+  bgScaleInput.max = '10';
+  bgScaleInput.value = String(mapBackgroundScale);
+  bgScaleInput.addEventListener('input', () => {
+    const n = Number(bgScaleInput.value);
+    if (!Number.isFinite(n) || n <= 0) return;
+    mapBackgroundScale = Math.max(0.1, Math.min(10, n));
+    applyBackgroundCalibration();
+  });
+  bgScaleWrap.appendChild(bgScaleInput);
+  toolbar.appendChild(bgScaleWrap);
+
+  const bgOffsetXWrap = document.createElement('label');
+  bgOffsetXWrap.className = 'map-bg-adjust';
+  bgOffsetXWrap.appendChild(document.createTextNode('X'));
+  const bgOffsetXInput = document.createElement('input');
+  bgOffsetXInput.type = 'number';
+  bgOffsetXInput.step = '10';
+  bgOffsetXInput.value = String(mapBackgroundOffsetX);
+  bgOffsetXInput.addEventListener('input', () => {
+    const n = Number(bgOffsetXInput.value);
+    if (!Number.isFinite(n)) return;
+    mapBackgroundOffsetX = n;
+    applyBackgroundCalibration();
+  });
+  bgOffsetXWrap.appendChild(bgOffsetXInput);
+  toolbar.appendChild(bgOffsetXWrap);
+
+  const bgOffsetYWrap = document.createElement('label');
+  bgOffsetYWrap.className = 'map-bg-adjust';
+  bgOffsetYWrap.appendChild(document.createTextNode('Y'));
+  const bgOffsetYInput = document.createElement('input');
+  bgOffsetYInput.type = 'number';
+  bgOffsetYInput.step = '10';
+  bgOffsetYInput.value = String(mapBackgroundOffsetY);
+  bgOffsetYInput.addEventListener('input', () => {
+    const n = Number(bgOffsetYInput.value);
+    if (!Number.isFinite(n)) return;
+    mapBackgroundOffsetY = n;
+    applyBackgroundCalibration();
+  });
+  bgOffsetYWrap.appendChild(bgOffsetYInput);
+  toolbar.appendChild(bgOffsetYWrap);
+
+  const bgCalibResetBtn = document.createElement('button');
+  bgCalibResetBtn.textContent = 'Reset BG Align';
+  bgCalibResetBtn.title = 'Reset background scale and offsets';
+  bgCalibResetBtn.addEventListener('click', () => {
+    mapBackgroundScale = 1;
+    mapBackgroundOffsetX = 0;
+    mapBackgroundOffsetY = 0;
+    bgScaleInput.value = '1';
+    bgOffsetXInput.value = '0';
+    bgOffsetYInput.value = '0';
+    applyBackgroundCalibration();
+  });
+  toolbar.appendChild(bgCalibResetBtn);
+
+  const bgStatus = document.createElement('span');
+  bgStatus.className = 'map-bg-status';
+  if (mapBackgroundStatus) {
+    const isErr = mapBackgroundStatus.toLowerCase().includes('fail');
+    bgStatus.classList.add(isErr ? 'err' : 'ok');
+    bgStatus.textContent = mapBackgroundStatus;
+  } else if (mapBackgroundEnabled && mapBackgroundUrl) {
+    bgStatus.textContent = 'Background enabled';
+  } else {
+    bgStatus.textContent = 'No background image set';
+  }
+  toolbar.appendChild(bgStatus);
+  wrapper.appendChild(toolbar);
+
+  const productionGroups = [];
+  const prodMap = new Map();
+  points.forEach(p => {
+    if (!p.producedItem || !(p.perMinute > 0)) return;
+    const key = p.producedItem;
+    if (!prodMap.has(key)) {
+      prodMap.set(key, { itemName: key, totalPerMinute: 0, sumX: 0, sumY: 0, count: 0 });
+    }
+    const g = prodMap.get(key);
+    g.totalPerMinute += p.perMinute;
+    g.sumX += p.plotX;
+    g.sumY += p.plotY;
+    g.count += 1;
+  });
+  prodMap.forEach((g) => {
+    productionGroups.push({
+      itemName: g.itemName,
+      totalPerMinute: g.totalPerMinute,
+      cx: g.sumX / g.count,
+      cy: g.sumY / g.count,
+      count: g.count
+    });
+  });
+  productionGroups.sort((a, b) => b.totalPerMinute - a.totalPerMinute);
+
+  const mapDiv = h('div', { className: 'map-container', id: 'mapContainer' });
+  const svgNs = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNs, 'svg');
+  svg.setAttribute('viewBox', `${vbMinX} ${vbMinY} ${vbW} ${vbH}`);
+  svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+  const bgRect = document.createElementNS(svgNs, 'rect');
+  bgRect.setAttribute('x', vbMinX);
+  bgRect.setAttribute('y', vbMinY);
+  bgRect.setAttribute('width', vbW);
+  bgRect.setAttribute('height', vbH);
+  bgRect.setAttribute('fill', '#13132b');
+  svg.appendChild(bgRect);
+
+  const g = document.createElementNS(svgNs, 'g');
+  g.id = 'mapPanZoom';
+  g.setAttribute('transform', `translate(${mapTranslateX},${mapTranslateY}) scale(${mapScale})`);
+  if (mapBackgroundEnabled && mapBackgroundUrl) {
+    const bgCalib = document.createElementNS(svgNs, 'g');
+    bgCalib.id = 'mapBackgroundCalib';
+    bgCalib.setAttribute(
+      'transform',
+      `translate(${mapBackgroundOffsetX},${mapBackgroundOffsetY}) scale(${mapBackgroundScale})`
+    );
+    const mapBgImage = document.createElementNS(svgNs, 'image');
+    mapBgImage.id = 'mapBackgroundImage';
+    mapBgImage.setAttribute('x', vbMinX);
+    mapBgImage.setAttribute('y', vbMinY);
+    mapBgImage.setAttribute('width', vbW);
+    mapBgImage.setAttribute('height', vbH);
+    mapBgImage.setAttribute('preserveAspectRatio', 'none');
+    mapBgImage.setAttribute('opacity', String(mapBackgroundOpacity));
+    mapBgImage.setAttribute('href', mapBackgroundUrl);
+    mapBgImage.addEventListener('load', () => {
+      mapBackgroundStatus = 'Background loaded';
+      bgStatus.className = 'map-bg-status ok';
+      bgStatus.textContent = mapBackgroundStatus;
+    });
+    mapBgImage.addEventListener('error', () => {
+      mapBackgroundStatus = 'Failed to load background image';
+      bgStatus.className = 'map-bg-status err';
+      bgStatus.textContent = mapBackgroundStatus;
+    });
+    bgCalib.appendChild(mapBgImage);
+    g.appendChild(bgCalib);
+  }
+
+  const byName = {};
+  points.forEach(p => {
+    byName[p.name] = (byName[p.name] || 0) + 1;
+  });
+  // Initialize visibility: by default only Crafting is enabled
+  points.forEach(p => {
+    if (mapBuildingVisibility[p.name] === undefined) {
+      mapBuildingVisibility[p.name] = (p.category === MAP_DEFAULT_VISIBLE_CATEGORY);
+    }
+  });
+  const mapSpan = Math.min(vbW, vbH);
+  const baseSize = mapSpan * 0.0012;
+  const minSize = Math.max(1, baseSize * 0.3);
+  const maxSize = mapSpan * 0.012;
+  const baseSizeProd = mapSpan * 0.008;
+  const buildingRects = [];
+  const productionHoverTargets = [];
+  function setRectVisibility(grp, visibilityMap) {
+    for (let i = 0; i < grp.children.length; i++) {
+      const rect = grp.children[i];
+      const name = rect.getAttribute('data-name');
+      if (name != null) rect.style.display = visibilityMap[name] !== false ? '' : 'none';
+    }
+  }
+  if (mapViewMode === 'buildings') {
+    points.forEach(p => {
+      const rect = document.createElementNS(svgNs, 'rect');
+      const w = Math.max(minSize, Math.min(maxSize, baseSize * (p.scaleX ?? 1)));
+      const h = Math.max(minSize, Math.min(maxSize, baseSize * (p.scaleY ?? 1)));
+      rect.setAttribute('x', p.plotX - w / 2);
+      rect.setAttribute('y', p.plotY - h / 2);
+      rect.setAttribute('width', w);
+      rect.setAttribute('height', h);
+      rect.setAttribute('fill', hashColor(p.name));
+      rect.setAttribute('stroke', 'rgba(0,0,0,0.5)');
+      rect.setAttribute('stroke-width', '0.5');
+      rect.setAttribute('data-name', p.name);
+      rect.setAttribute('data-category', p.category);
+      rect.style.cursor = 'pointer';
+      rect.style.display = mapBuildingVisibility[p.name] !== false ? '' : 'none';
+      g.appendChild(rect);
+      buildingRects.push(rect);
+    });
+  } else {
+    productionGroups.forEach((grp) => {
+      const sizeFactor = Math.min(4, Math.max(0.8, Math.sqrt(grp.totalPerMinute) / 4));
+      const side = baseSizeProd * sizeFactor;
+      const rect = document.createElementNS(svgNs, 'rect');
+      rect.setAttribute('x', grp.cx - side / 2);
+      rect.setAttribute('y', grp.cy - side / 2);
+      rect.setAttribute('width', side);
+      rect.setAttribute('height', side);
+      rect.setAttribute('fill', hashColor(grp.itemName));
+      rect.setAttribute('stroke', 'rgba(0,0,0,0.6)');
+      rect.setAttribute('stroke-width', '1');
+      rect.setAttribute('data-item', grp.itemName);
+      rect.style.cursor = 'pointer';
+      g.appendChild(rect);
+      const text = document.createElementNS(svgNs, 'text');
+      text.setAttribute('x', grp.cx);
+      text.setAttribute('y', grp.cy);
+      text.setAttribute('text-anchor', 'middle');
+      text.setAttribute('dominant-baseline', 'middle');
+      text.setAttribute('font-size', Math.max(2, Math.min(side * 0.35, mapSpan * 0.008)));
+      text.setAttribute('fill', 'rgba(0,0,0,0.9)');
+      text.textContent = `${grp.itemName} · ${grp.totalPerMinute.toFixed(1)}/min`;
+      g.appendChild(text);
+      productionHoverTargets.push({ grp, rect, text });
+    });
+  }
+  svg.appendChild(g);
+  mapDiv.appendChild(svg);
+
+  const hoverLabel = document.createElement('div');
+  hoverLabel.className = 'map-hover-label';
+  hoverLabel.innerHTML = '<span class="map-hover-label-name"></span><div class="map-hover-label-cat"></div><div class="map-hover-label-produces"></div>';
+  const hoverLabelName = hoverLabel.querySelector('.map-hover-label-name');
+  const hoverLabelCat = hoverLabel.querySelector('.map-hover-label-cat');
+  const hoverLabelProduces = hoverLabel.querySelector('.map-hover-label-produces');
+  const labelOffset = 12;
+  function showHoverLabel(name, category, clientX, clientY, displayName, producedItem, productionRate) {
+    if (productionRate != null) {
+      hoverLabelName.textContent = name;
+      hoverLabelCat.textContent = `${productionRate.toFixed(1)} / min`;
+      hoverLabelProduces.style.display = 'none';
+    } else {
+      if (displayName && displayName !== name) {
+        hoverLabelName.textContent = displayName;
+        hoverLabelCat.textContent = `${name} · ${category}`;
+      } else {
+        hoverLabelName.textContent = name;
+        hoverLabelCat.textContent = category;
+      }
+      if (producedItem) {
+        hoverLabelProduces.textContent = `Producing: ${producedItem}`;
+        hoverLabelProduces.style.display = '';
+      } else {
+        hoverLabelProduces.style.display = 'none';
+      }
+    }
+    hoverLabel.classList.add('visible');
+    positionHoverLabel(clientX, clientY);
+  }
+  function positionHoverLabel(clientX, clientY) {
+    const wr = wrapper.getBoundingClientRect();
+    let left = clientX - wr.left + labelOffset;
+    let top = clientY - wr.top + labelOffset;
+    if (left + hoverLabel.offsetWidth > wr.width) left = clientX - wr.left - hoverLabel.offsetWidth - 4;
+    if (top + hoverLabel.offsetHeight > wr.height) top = clientY - wr.top - hoverLabel.offsetHeight - 4;
+    if (left < 4) left = 4;
+    if (top < 4) top = 4;
+    hoverLabel.style.left = left + 'px';
+    hoverLabel.style.top = top + 'px';
+  }
+  function hideHoverLabel() {
+    hoverLabel.classList.remove('visible');
+  }
+  if (mapViewMode === 'buildings') {
+    points.forEach((p, i) => {
+      const rect = buildingRects[i];
+      if (!rect) return;
+      rect.addEventListener('mouseenter', (e) => {
+        showHoverLabel(p.name, p.category, e.clientX, e.clientY, p.displayName, p.producedItem, null);
+      });
+      rect.addEventListener('mousemove', (e) => {
+        positionHoverLabel(e.clientX, e.clientY);
+      });
+      rect.addEventListener('mouseleave', hideHoverLabel);
+    });
+  } else {
+    productionHoverTargets.forEach(({ grp, rect, text: textEl }) => {
+      function showProdHover(e) {
+        showHoverLabel(grp.itemName, '', e.clientX, e.clientY, null, null, grp.totalPerMinute);
+      }
+      [rect, textEl].forEach((el) => {
+        el.addEventListener('mouseenter', showProdHover);
+        el.addEventListener('mousemove', (e) => positionHoverLabel(e.clientX, e.clientY));
+        el.addEventListener('mouseleave', hideHoverLabel);
+      });
+    });
+  }
+  mapDiv.addEventListener('mousemove', (e) => {
+    if (hoverLabel.classList.contains('visible')) positionHoverLabel(e.clientX, e.clientY);
+  });
+  wrapper.appendChild(mapDiv);
+  wrapper.appendChild(hoverLabel);
+  layout.appendChild(wrapper);
+
+  let isDragging = false;
+  let startX, startY, startTx, startTy;
+
+  const viewCenterX = vbMinX + vbW / 2;
+  const viewCenterY = vbMinY + vbH / 2;
+
+  function pixelToViewBox(deltaPx, deltaPy) {
+    const rect = mapDiv.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return { dx: 0, dy: 0 };
+    const fitScale = Math.min(rect.width / vbW, rect.height / vbH);
+    return { dx: deltaPx / fitScale, dy: deltaPy / fitScale };
+  }
+
+  function updateMapTransform() {
+    const el = document.getElementById('mapPanZoom');
+    if (el) el.setAttribute('transform', `translate(${mapTranslateX},${mapTranslateY}) scale(${mapScale})`);
+  }
+
+  mapDiv.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    isDragging = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    startTx = mapTranslateX;
+    startTy = mapTranslateY;
+  });
+  mapDiv.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    e.preventDefault();
+    const delta = pixelToViewBox(e.clientX - startX, e.clientY - startY);
+    mapTranslateX = startTx + delta.dx;
+    mapTranslateY = startTy + delta.dy;
+    updateMapTransform();
+  });
+  document.addEventListener('mouseup', () => { isDragging = false; });
+  mapDiv.addEventListener('mouseleave', () => { isDragging = false; });
+  mapDiv.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const factor = e.deltaY > 0 ? 0.9 : 1.1;
+    const newScale = Math.max(0.2, Math.min(20, mapScale * factor));
+    if (newScale !== mapScale) {
+      mapTranslateX = mapTranslateX + (1 - newScale / mapScale) * (viewCenterX - mapTranslateX);
+      mapTranslateY = mapTranslateY + (1 - newScale / mapScale) * (viewCenterY - mapTranslateY);
+      mapScale = newScale;
+      updateMapTransform();
+    }
+  }, { passive: false });
+
+  const legend = h('div', { className: 'map-legend' });
+  if (mapViewMode === 'production') {
+    const legendTitle = document.createElement('h3');
+    legendTitle.textContent = 'Production groups';
+    legend.appendChild(legendTitle);
+    productionGroups.forEach((grp) => {
+      const item = document.createElement('div');
+      item.className = 'map-legend-item map-legend-item-production';
+      const dot = document.createElement('span');
+      dot.className = 'map-legend-dot';
+      dot.style.background = hashColor(grp.itemName);
+      const label = document.createElement('span');
+      label.textContent = grp.itemName;
+      const rateSpan = document.createElement('span');
+      rateSpan.className = 'map-legend-count';
+      rateSpan.textContent = `${grp.totalPerMinute.toFixed(1)} / min`;
+      item.appendChild(dot);
+      item.appendChild(label);
+      item.appendChild(rateSpan);
+      legend.appendChild(item);
+    });
+  } else {
+    const legendHeader = document.createElement('div');
+    legendHeader.className = 'map-legend-header';
+    const legendTitle = document.createElement('h3');
+    legendTitle.textContent = 'Show on map';
+    legendHeader.appendChild(legendTitle);
+    const allBtn = document.createElement('button');
+    allBtn.className = 'map-legend-toggle';
+    allBtn.textContent = 'All';
+    allBtn.title = 'Show all building types';
+    const noneBtn = document.createElement('button');
+    noneBtn.className = 'map-legend-toggle';
+    noneBtn.textContent = 'None';
+    noneBtn.title = 'Hide all building types';
+    legendHeader.appendChild(allBtn);
+    legendHeader.appendChild(noneBtn);
+    legend.appendChild(legendHeader);
+    const byCategory = {};
+    positions.forEach(p => {
+      if (!byCategory[p.category]) byCategory[p.category] = [];
+      byCategory[p.category].push(p);
+    });
+    const catOrder = [...new Set(positions.map(p => p.category))].sort();
+    function updateCategoryCheckbox(catCheckbox, catDiv) {
+      const itemCheckboxes = catDiv.querySelectorAll('.map-legend-item-toggle input[type="checkbox"]');
+      const checked = [...itemCheckboxes].filter(cb => cb.checked).length;
+      catCheckbox.checked = checked === itemCheckboxes.length;
+      catCheckbox.indeterminate = checked > 0 && checked < itemCheckboxes.length;
+    }
+    catOrder.forEach(cat => {
+      const catDiv = document.createElement('div');
+      catDiv.className = 'map-legend-cat';
+      const list = byCategory[cat];
+      const names = [...new Set(list.map(p => p.name))].sort();
+      const catTitleRow = document.createElement('label');
+      catTitleRow.className = 'map-legend-cat-title map-legend-cat-toggle';
+      const catCheckbox = document.createElement('input');
+      catCheckbox.type = 'checkbox';
+      catCheckbox.checked = names.every(name => mapBuildingVisibility[name] !== false);
+      catCheckbox.indeterminate = names.some(name => mapBuildingVisibility[name]) && !catCheckbox.checked;
+      catCheckbox.addEventListener('change', () => {
+        const on = catCheckbox.checked;
+        list.forEach(p => { mapBuildingVisibility[p.name] = on; });
+        catDiv.querySelectorAll('.map-legend-item-toggle input[type="checkbox"]').forEach(cb => { cb.checked = on; });
+        catCheckbox.indeterminate = false;
+        setRectVisibility(g, mapBuildingVisibility);
+      });
+      const catTitleText = document.createElement('span');
+      catTitleText.textContent = cat;
+      catTitleRow.appendChild(catCheckbox);
+      catTitleRow.appendChild(catTitleText);
+      catDiv.appendChild(catTitleRow);
+      names.forEach(name => {
+        const count = list.filter(p => p.name === name).length;
+        const color = hashColor(name);
+        const item = document.createElement('label');
+        item.className = 'map-legend-item map-legend-item-toggle';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = mapBuildingVisibility[name] !== false;
+        checkbox.addEventListener('change', () => {
+          mapBuildingVisibility[name] = checkbox.checked;
+          setRectVisibility(g, mapBuildingVisibility);
+          updateCategoryCheckbox(catCheckbox, catDiv);
+        });
+        const dot = document.createElement('span');
+        dot.className = 'map-legend-dot';
+        dot.style.background = color;
+        const label = document.createElement('span');
+        label.textContent = name;
+        const countSpan = document.createElement('span');
+        countSpan.className = 'map-legend-count';
+        countSpan.textContent = String(count);
+        item.appendChild(checkbox);
+        item.appendChild(dot);
+        item.appendChild(label);
+        item.appendChild(countSpan);
+        catDiv.appendChild(item);
+      });
+      legend.appendChild(catDiv);
+    });
+    allBtn.addEventListener('click', () => {
+      positions.forEach(p => { mapBuildingVisibility[p.name] = true; });
+      legend.querySelectorAll('.map-legend-item-toggle input[type="checkbox"]').forEach(cb => { cb.checked = true; });
+      setRectVisibility(g, mapBuildingVisibility);
+    });
+    noneBtn.addEventListener('click', () => {
+      positions.forEach(p => { mapBuildingVisibility[p.name] = false; });
+      legend.querySelectorAll('.map-legend-item-toggle input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+      setRectVisibility(g, mapBuildingVisibility);
+    });
+  }
+  layout.appendChild(legend);
+  container.appendChild(layout);
+}
+
+// ===== Shared Components =====
+function createSearchBar(value, onChange, placeholder) {
+  const wrapper = h('div', { className: 'search-wrapper' });
+  wrapper.innerHTML = `<svg class="search-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+  </svg>`;
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'search-input';
+  input.placeholder = placeholder;
+  input.value = value;
+  input.addEventListener('input', (e) => onChange(e.target.value));
+  wrapper.appendChild(input);
+
+  if (value) {
+    const clearBtn = document.createElement('button');
+    clearBtn.className = 'search-clear';
+    clearBtn.innerHTML = `<svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+    </svg>`;
+    clearBtn.addEventListener('click', () => onChange(''));
+    wrapper.appendChild(clearBtn);
+  }
+
+  return wrapper;
+}
+
+function sortIconHTML(field, currentField, currentDir) {
+  if (currentField !== field) {
+    return `<span class="sort-icon inactive">\u2191\u2193</span>`;
+  }
+  return `<span class="sort-icon active">${currentDir === 'asc' ? '\u2191' : '\u2193'}</span>`;
+}
+
+function esc(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// ===== Navigation =====
+function goBack() {
+  analysisData = null;
+  activeSaveName = null;
+  activeTab = 'buildings';
+  buildingsSearch = '';
+  buildingsCollapsed = new Set();
+  productionSearch = '';
+  productionBuildingFilter = null;
+  productionSortField = 'name';
+  productionSortDir = 'asc';
+  storageSearch = '';
+  storageSortField = 'name';
+  storageSortDir = 'asc';
+  mapScale = 1;
+  mapTranslateX = 0;
+  mapTranslateY = 0;
+  mapBuildingVisibility = {};
+  mapViewMode = 'buildings';
+  mapBackgroundOpacity = 0.55;
+  mapBackgroundStatus = '';
+  mapBackgroundScale = 1;
+  mapBackgroundOffsetX = 0;
+  mapBackgroundOffsetY = 0;
+
+  $('#activeSaveLabel').classList.add('hidden');
+  $('#backBtn').classList.add('hidden');
+  $('#tabsContainer').classList.add('hidden');
+
+  renderPickerView();
+}
+
+function showAnalysis(data, filename) {
+  analysisData = data;
+  activeSaveName = filename;
+  activeTab = 'buildings';
+
+  $('#activeSaveLabel').textContent = '\u2014 ' + filename;
+  $('#activeSaveLabel').classList.remove('hidden');
+  $('#backBtn').classList.remove('hidden');
+  $('#tabsContainer').classList.remove('hidden');
+
+  renderAnalysisView();
+}
+
+// ===== File Handling =====
+async function handleFileSelect(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  await processFile(file);
+  // Reset so the same file can be re-selected
+  e.target.value = '';
+}
+
+async function processFile(file) {
+  const loading = $('#loadingOverlay');
+  const main = $('#mainContent');
+
+  loading.classList.remove('hidden');
+
+  try {
+    const jsonContent = await parseSaveFile(file);
+    const result = analyze(jsonContent);
+    showAnalysis(result, file.name);
+  } catch (err) {
+    console.error('Failed to analyze save file:', err);
+    main.innerHTML = '';
+    const errorDiv = h('div', { className: 'error-banner' },
+      `Failed to analyze save file: ${err.message}`
+    );
+    main.appendChild(errorDiv);
+
+    // Re-show picker below the error
+    const pickerDiv = document.createElement('div');
+    main.appendChild(pickerDiv);
+    renderPickerView();
+  } finally {
+    loading.classList.add('hidden');
+  }
+}
+
+// ===== Drag & Drop =====
+document.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  document.body.classList.add('drag-active');
+});
+
+document.addEventListener('dragleave', (e) => {
+  if (e.relatedTarget === null) {
+    document.body.classList.remove('drag-active');
+  }
+});
+
+document.addEventListener('drop', (e) => {
+  e.preventDefault();
+  document.body.classList.remove('drag-active');
+  const file = e.dataTransfer.files[0];
+  if (file && file.name.endsWith('.sav')) {
+    processFile(file);
+  }
+});
+
+// ===== Init =====
+renderPickerView();
+</script>
+</body>
+</html>
