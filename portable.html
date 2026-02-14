@@ -2124,12 +2124,17 @@ function renderShortfallsTab(container) {
   );
   container.appendChild(toolbar);
 
+  const storageByItem = new Map();
+  (analysisData.storage || []).forEach(s => { storageByItem.set(s.name, (storageByItem.get(s.name) || 0) + s.count); });
+
   const panel = h('div', { className: 'panel' });
   const table = document.createElement('table');
   const thead = document.createElement('thead');
   thead.innerHTML = `
     <tr>
       <th class="left">Item</th>
+      <th class="right">Stored</th>
+      <th class="right">Until empty</th>
       <th class="right">Produced /min</th>
       <th class="right">Consumed /min</th>
       <th class="right">Surplus /min</th>
@@ -2140,10 +2145,19 @@ function renderShortfallsTab(container) {
   tbody.className = 'divide';
   if (shortfalls.length === 0) {
     const tr = document.createElement('tr');
-    tr.innerHTML = '<td colspan="4" class="empty-msg" style="text-align:center;padding:2rem;color:var(--gray-500)">No demand data. Recipe inputs are used to compute consumption; add more buildings with recipes to see shortfalls.</td>';
+    tr.innerHTML = '<td colspan="6" class="empty-msg" style="text-align:center;padding:2rem;color:var(--gray-500)">No demand data. Recipe inputs are used to compute consumption; add more buildings with recipes to see shortfalls.</td>';
     tbody.appendChild(tr);
   } else {
     for (const row of shortfalls) {
+      const stored = storageByItem.get(row.name) || 0;
+      const consumedPerMin = row.consumed || 0;
+      let untilEmpty = '—';
+      if (consumedPerMin > 0 && stored > 0) {
+        const minutes = stored / consumedPerMin;
+        untilEmpty = minutes >= 60 ? (minutes / 60).toFixed(1) + ' h' : minutes.toFixed(1) + ' min';
+      } else if (consumedPerMin > 0 && stored <= 0) {
+        untilEmpty = '0 min';
+      }
       const tr = document.createElement('tr');
       tr.className = 'shortfall-main-row' + (row.shortfall > 0 ? ' shortfall-row' : '');
       const consumedBy = row.consumedBy || [];
@@ -2156,6 +2170,8 @@ function renderShortfallsTab(container) {
           ${expandIcon}
           <span class="name-with-icon">${itemIconHTML(row.name)}${esc(row.name)}</span>
         </td>
+        <td class="right mono">${stored.toLocaleString()}</td>
+        <td class="right mono" title="Time at current consumption until storage is empty">${untilEmpty}</td>
         <td class="right mono">${row.produced.toLocaleString()}</td>
         <td class="right mono">${row.consumed.toLocaleString()}</td>
         <td class="right mono ${row.shortfall > 0 ? 'color-red' : ''}">${(-(row.shortfall)).toLocaleString()}</td>`;
@@ -2165,7 +2181,7 @@ function renderShortfallsTab(container) {
         const detailTr = document.createElement('tr');
         detailTr.className = 'shortfall-detail-row';
         const cell = document.createElement('td');
-        cell.colSpan = 4;
+        cell.colSpan = 6;
         cell.className = 'shortfall-detail-cell';
         const list = consumedBy.map(c =>
           `<span class="shortfall-consumed-by-item"><span class="name-with-icon">${itemIconHTML(c.producerItemName)}${esc(c.producerItemName)}</span><span class="mono"> ${c.rate.toLocaleString()}/min</span></span>`
