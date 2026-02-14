@@ -413,6 +413,14 @@
     .map-view-radio input[type="radio"] { accent-color: var(--accent-blue); cursor: pointer; }
     .map-view-radio label { font-size: 0.8rem; color: var(--gray-400); cursor: pointer; }
     .map-production-by-area { overflow-y: auto; max-height: 70vh; }
+    .map-production-search-wrap { padding: 0 0.5rem 0.5rem; }
+    .map-production-search {
+      width: 100%; box-sizing: border-box; padding: 0.35rem 0.5rem; font-size: 0.8rem;
+      background: var(--dark-700); border: 1px solid var(--dark-600); border-radius: 0.25rem;
+      color: var(--gray-200);
+    }
+    .map-production-search::placeholder { color: var(--gray-500); }
+    .map-production-search:focus { outline: none; border-color: var(--accent-blue); }
     .map-production-area-section {
       margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--dark-600);
     }
@@ -765,6 +773,7 @@ let mapBuildingVisibility = {};
 let mapViewMode = 'buildings'; // 'buildings' | 'production'
 let mapAreaVisibility = {}; // area id -> true/false; default true when undefined
 let mapHighlightedAreaId = null; // area id highlighted in legend when clicking area on map
+let productionAreaSearch = ''; // filter production legend to areas producing this item
 
 // StarRuptureMap-style world-to-SVG transform (from StarRuptureMap main.go)
 // Go uses full SVG 4352x5120; playable area is (380,567) to (3927,4038). We use content-only viewBox.
@@ -2265,6 +2274,62 @@ function renderMapTab(container) {
     prodTitle.textContent = 'Production by area';
     prodHeader.appendChild(prodTitle);
     prodPanel.appendChild(prodHeader);
+    const searchWrap = document.createElement('div');
+    searchWrap.className = 'map-production-search-wrap';
+    const searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.className = 'map-production-search';
+    searchInput.placeholder = 'Filter by item...';
+    searchInput.value = productionAreaSearch;
+    function applyProductionAreaFilter() {
+      const q = productionAreaSearch.trim().toLowerCase();
+      prodPanel.querySelectorAll('.map-production-area-section').forEach(section => {
+        const id = section.getAttribute('data-area-id');
+        const area = productionByArea.find(a => String(a.id) === id);
+        const match = !q || (area && area.items.some(it => it.name.toLowerCase().includes(q)));
+        section.style.display = match ? '' : 'none';
+      });
+    }
+    function updateProductionFilterFromSearch() {
+      const q = productionAreaSearch.trim().toLowerCase();
+      productionByArea.forEach(area => {
+        const match = !q || area.items.some(it => it.name.toLowerCase().includes(q));
+        mapAreaVisibility[area.id] = match;
+      });
+      prodPanel.querySelectorAll('.map-production-area-section').forEach(section => {
+        const id = section.getAttribute('data-area-id');
+        const area = productionByArea.find(a => String(a.id) === id);
+        const match = !q || (area && area.items.some(it => it.name.toLowerCase().includes(q)));
+        section.style.display = match ? '' : 'none';
+        const cb = section.querySelector('input[type="checkbox"]');
+        if (cb && area != null) cb.checked = mapAreaVisibility[area.id] !== false;
+      });
+      const areaMarkersGrp = document.getElementById('mapAreaMarkers');
+      if (areaMarkersGrp) {
+        for (let i = 0; i < areaMarkersGrp.children.length; i++) {
+          const el = areaMarkersGrp.children[i];
+          const areaId = el.getAttribute('data-area-id');
+          if (areaId != null) el.style.display = mapAreaVisibility[areaId] !== false ? '' : 'none';
+        }
+      }
+      const buildingRectsGrp = document.getElementById('mapBuildingRects');
+      if (buildingRectsGrp && mapViewMode === 'production') {
+        for (let i = 0; i < buildingRectsGrp.children.length; i++) {
+          const el = buildingRectsGrp.children[i];
+          const areaIdStr = el.getAttribute('data-area-id');
+          const category = el.getAttribute('data-category');
+          const areaVisible = areaIdStr != null && mapAreaVisibility[areaIdStr] !== false;
+          const show = areaVisible && MAP_PRODUCTION_CATEGORIES.has(category);
+          el.style.display = show ? '' : 'none';
+        }
+      }
+    }
+    searchInput.addEventListener('input', () => {
+      productionAreaSearch = searchInput.value;
+      updateProductionFilterFromSearch();
+    });
+    searchWrap.appendChild(searchInput);
+    prodPanel.appendChild(searchWrap);
     productionByArea.forEach(area => {
       const areaSection = document.createElement('div');
       areaSection.className = 'map-production-area-section' + (mapAreaVisibility[area.id] === false ? ' area-disabled' : '') + (mapHighlightedAreaId === area.id ? ' area-highlighted' : '');
@@ -2309,6 +2374,7 @@ function renderMapTab(container) {
       areaSection.appendChild(areaBody);
       prodPanel.appendChild(areaSection);
     });
+    applyProductionAreaFilter();
     layout.appendChild(prodPanel);
     if (mapHighlightedAreaId != null) {
       const highlightedEl = prodPanel.querySelector('[data-area-id="' + mapHighlightedAreaId + '"]');
