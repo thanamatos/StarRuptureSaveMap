@@ -519,10 +519,6 @@
         <div class="logo"><span class="logo-accent">Rupture</span> Production</div>
         <span class="active-save-label hidden" id="activeSaveLabel"></span>
       </div>
-      <button class="back-btn hidden" id="backBtn" onclick="goBack()">
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
-        Change Save
-      </button>
     </div>
     <div class="tabs-container hidden" id="tabsContainer">
       <nav class="tabs-nav" id="tabsNav"></nav>
@@ -3539,7 +3535,6 @@ function goBack() {
   storageSortDir = 'asc';
 
   $('#activeSaveLabel').classList.add('hidden');
-  $('#backBtn').classList.add('hidden');
   $('#tabsContainer').classList.add('hidden');
 
   renderPickerView();
@@ -3552,7 +3547,6 @@ function showAnalysis(data, filename) {
 
   $('#activeSaveLabel').textContent = '\u2014 ' + filename;
   $('#activeSaveLabel').classList.remove('hidden');
-  $('#backBtn').classList.remove('hidden');
   $('#tabsContainer').classList.remove('hidden');
 
   renderAnalysisView();
