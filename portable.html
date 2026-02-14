@@ -441,6 +441,7 @@
     .map-production-area-table th { text-align: left; color: var(--gray-500); font-weight: 500; padding: 0.2rem 0; }
     .map-production-area-table td { padding: 0.15rem 0; color: var(--gray-400); }
     .map-production-area-table .right { text-align: right; }
+    .map-production-area-table .rate-deficit { color: var(--red-400, #f87171); }
     .map-hover-label {
       position: absolute; pointer-events: none;
       padding: 0.35rem 0.6rem; border-radius: 0.25rem;
@@ -790,6 +791,18 @@ const MAP_IMAGE_HEIGHT = 5120;
 const BASE_MAP_URL = 'https://raw.githubusercontent.com/bithoarder/StarRuptureMap/main/base_map.webp';
 // Base core build area: axis-aligned square in world units (half of side length). Game uses this to limit where you can build.
 const BASE_CORE_BUILD_HALF_EXTENT = 10000;
+
+// Package sender: rail throughput (items/min). T1=120, T2=240, T3=480. Stack takes 10s to send after filling.
+const PACKAGE_RAIL_RATE_T1 = 120;
+const PACKAGE_RAIL_RATE_T2 = 240;
+const PACKAGE_RAIL_RATE_T3 = 480;
+const PACKAGE_SEND_DURATION_SEC = 10;
+const PACKAGE_SENDER_DEFAULT_RAIL_RATE = PACKAGE_RAIL_RATE_T1; // when rail type not known from save
+function packageSenderRate(itemsPerMinRail, requestedAmount) {
+  if (!requestedAmount || requestedAmount <= 0) return 0;
+  const cycleSec = (requestedAmount * 60) / itemsPerMinRail + PACKAGE_SEND_DURATION_SEC;
+  return (requestedAmount * 60) / cycleSec;
+}
 
 function worldToMapCoords(worldX, worldY) {
   return {
@@ -1357,16 +1370,26 @@ function analyze(jsonContent) {
       p.areaId = 0;
     }
   }
+  const entityIdToAreaId = new Map();
+  for (const p of buildingPositions) {
+    if (p.entityId != null && p.areaId != null) entityIdToAreaId.set(String(p.entityId), p.areaId);
+  }
+
   const productionByArea = [];
   if (baseCores.length > 0) {
     const areaProduction = baseCores.map((bc, i) => ({
       id: i,
       label: (bc.displayName && bc.displayName.trim()) ? bc.displayName.trim() : ('Area ' + (i + 1)),
       x: bc.x, y: bc.y,
-      items: new Map(),
+      items: new Map(), // name -> { produced, sent }
       totalPerMinute: 0
     }));
-    // Only count production from buildings inside each area's square (same square as drawn on map)
+    function getItem(area, name) {
+      let o = area.items.get(name);
+      if (!o) { o = { produced: 0, sent: 0 }; area.items.set(name, o); }
+      return o;
+    }
+    // Production from buildings inside each area's square
     for (const p of buildingPositions) {
       if (!p.producedItem || (p.producedPerMinute || 0) <= 0) continue;
       let bestIdx = -1;
@@ -1379,14 +1402,32 @@ function analyze(jsonContent) {
       }
       if (bestIdx >= 0) {
         const area = areaProduction[bestIdx];
-        const cur = area.items.get(p.producedItem) || 0;
-        area.items.set(p.producedItem, cur + (p.producedPerMinute || 0));
+        const o = getItem(area, p.producedItem);
+        o.produced += p.producedPerMinute || 0;
         area.totalPerMinute += p.producedPerMinute || 0;
       }
     }
+    // Package senders in this area: sent (output) rate per item
+    const railRate = PACKAGE_SENDER_DEFAULT_RAIL_RATE;
+    for (const conn of transportConnections) {
+      const areaId = entityIdToAreaId.get(conn.senderId);
+      if (areaId == null) continue;
+      const sendRate = packageSenderRate(railRate, conn.requestedAmount);
+      if (sendRate <= 0) continue;
+      const area = areaProduction[areaId];
+      const o = getItem(area, conn.itemDisplayName);
+      o.sent += sendRate;
+      area.totalPerMinute -= sendRate;
+    }
     for (const area of areaProduction) {
+      area.totalPerMinute = [...area.items.values()].reduce((s, o) => s + (o.produced - o.sent), 0);
       const itemArr = [...area.items.entries()]
-        .map(([name, perMinute]) => ({ name, perMinute: Math.round(perMinute * 100) / 100 }))
+        .map(([name, o]) => ({
+          name,
+          produced: Math.round(o.produced * 100) / 100,
+          sent: Math.round(o.sent * 100) / 100,
+          perMinute: Math.round((o.produced - o.sent) * 100) / 100
+        }))
         .sort((a, b) => b.perMinute - a.perMinute);
       productionByArea.push({
         id: area.id,
@@ -1398,14 +1439,28 @@ function analyze(jsonContent) {
     }
   } else {
     // No base cores: single "Entire map" area
-    const items = new Map();
+    const items = new Map(); // name -> { produced, sent }
     for (const p of buildingPositions) {
       if (!p.producedItem || (p.producedPerMinute || 0) <= 0) continue;
-      const cur = items.get(p.producedItem) || 0;
-      items.set(p.producedItem, cur + (p.producedPerMinute || 0));
+      let o = items.get(p.producedItem);
+      if (!o) { o = { produced: 0, sent: 0 }; items.set(p.producedItem, o); }
+      o.produced += p.producedPerMinute || 0;
+    }
+    const railRate = PACKAGE_SENDER_DEFAULT_RAIL_RATE;
+    for (const conn of transportConnections) {
+      const sendRate = packageSenderRate(railRate, conn.requestedAmount);
+      if (sendRate <= 0) continue;
+      let o = items.get(conn.itemDisplayName);
+      if (!o) { o = { produced: 0, sent: 0 }; items.set(conn.itemDisplayName, o); }
+      o.sent += sendRate;
     }
     const itemArr = [...items.entries()]
-      .map(([name, perMinute]) => ({ name, perMinute: Math.round(perMinute * 100) / 100 }))
+      .map(([name, o]) => ({
+        name,
+        produced: Math.round(o.produced * 100) / 100,
+        sent: Math.round(o.sent * 100) / 100,
+        perMinute: Math.round((o.produced - o.sent) * 100) / 100
+      }))
       .sort((a, b) => b.perMinute - a.perMinute);
     const total = itemArr.reduce((s, i) => s + i.perMinute, 0);
     productionByArea.push({
@@ -2125,6 +2180,9 @@ function renderMapTab(container) {
     const bottomRight = worldToMapCoords(area.x + halfExt, area.y + halfExt);
     const w = bottomRight.x - topLeft.x;
     const h = bottomRight.y - topLeft.y;
+    const areaGrp = document.createElementNS(svgNs, 'g');
+    areaGrp.setAttribute('data-area-id', String(area.id));
+    areaGrp.style.display = mapAreaVisibility[area.id] !== false ? '' : 'none';
     const rect = document.createElementNS(svgNs, 'rect');
     rect.setAttribute('x', topLeft.x);
     rect.setAttribute('y', topLeft.y);
@@ -2133,9 +2191,7 @@ function renderMapTab(container) {
     rect.setAttribute('fill', 'rgba(34,197,94,0.2)');
     rect.setAttribute('stroke', '#22c55e');
     rect.setAttribute('stroke-width', '2');
-    rect.setAttribute('data-area-id', String(area.id));
     rect.style.cursor = 'pointer';
-    rect.style.display = mapAreaVisibility[area.id] !== false ? '' : 'none';
     rect.setAttribute('pointer-events', 'all');
     rect.addEventListener('mousedown', (e) => e.stopPropagation());
     rect.addEventListener('click', (e) => {
@@ -2143,7 +2199,18 @@ function renderMapTab(container) {
       mapHighlightedAreaId = (mapHighlightedAreaId === area.id) ? null : area.id;
       renderTabContent();
     });
-    areaMarkersGrp.appendChild(rect);
+    areaGrp.appendChild(rect);
+    const label = document.createElementNS(svgNs, 'text');
+    label.setAttribute('x', topLeft.x + w / 2);
+    label.setAttribute('y', topLeft.y - 6);
+    label.setAttribute('text-anchor', 'middle');
+    label.setAttribute('font-size', '11');
+    label.setAttribute('font-weight', '600');
+    label.setAttribute('fill', '#22c55e');
+    label.setAttribute('pointer-events', 'none');
+    label.textContent = area.label;
+    areaGrp.appendChild(label);
+    areaMarkersGrp.appendChild(areaGrp);
   });
   g.appendChild(areaMarkersGrp);
 
@@ -2200,18 +2267,18 @@ function renderMapTab(container) {
   });
   const areaById = new Map(productionByArea.map(a => [String(a.id), a]));
   for (let i = 0; i < areaMarkersGrp.children.length; i++) {
-    const circle = areaMarkersGrp.children[i];
-    const area = areaById.get(circle.getAttribute('data-area-id'));
+    const areaEl = areaMarkersGrp.children[i];
+    const area = areaById.get(areaEl.getAttribute('data-area-id'));
     if (!area) continue;
-    circle.addEventListener('mouseenter', (e) => {
+    areaEl.addEventListener('mouseenter', (e) => {
       hoverLabelName.textContent = area.label;
       hoverLabelCat.textContent = area.items.length + ' items \u00B7 ' + area.totalPerMinute.toFixed(1) + '/min total';
       hoverLabelProduces.style.display = 'none';
       hoverLabel.classList.add('visible');
       positionHoverLabel(e.clientX, e.clientY);
     });
-    circle.addEventListener('mousemove', (e) => positionHoverLabel(e.clientX, e.clientY));
-    circle.addEventListener('mouseleave', hideHoverLabel);
+    areaEl.addEventListener('mousemove', (e) => positionHoverLabel(e.clientX, e.clientY));
+    areaEl.addEventListener('mouseleave', hideHoverLabel);
   }
   mapDiv.addEventListener('mousemove', (e) => {
     if (hoverLabel.classList.contains('visible')) positionHoverLabel(e.clientX, e.clientY);
@@ -2359,13 +2426,14 @@ function renderMapTab(container) {
         const table = document.createElement('table');
         table.className = 'map-production-area-table';
         const thead = document.createElement('thead');
-        thead.innerHTML = '<tr><th class="left">Item</th><th class="right">/min</th></tr>';
+        thead.innerHTML = '<tr><th class="left">Item</th><th class="right">Produced</th><th class="right">Sent</th></tr>';
         table.appendChild(thead);
         const tbody = document.createElement('tbody');
         tbody.className = 'divide';
-        area.items.forEach(({ name, perMinute }) => {
+        area.items.forEach(({ name, produced, sent }) => {
           const tr = document.createElement('tr');
-          tr.innerHTML = `<td class="left">${itemIconHTML(name)} ${esc(name)}</td><td class="right">${perMinute.toFixed(2)}</td>`;
+          const sentClass = sent > 0 ? ' right rate-deficit' : ' right';
+          tr.innerHTML = `<td class="left">${itemIconHTML(name)} ${esc(name)}</td><td class="right">${produced.toFixed(2)}</td><td class="${sentClass}">${sent > 0 ? sent.toFixed(2) : '—'}</td>`;
           tbody.appendChild(tr);
         });
         table.appendChild(tbody);
