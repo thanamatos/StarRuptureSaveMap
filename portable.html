@@ -192,6 +192,37 @@
     .color-amber { color: var(--accent-amber); }
     .color-red { color: #ef4444; }
     tr.shortfall-row { background: rgba(239, 68, 68, 0.08); }
+    .shortfall-expand {
+      display: inline-block;
+      width: 1rem;
+      margin-right: 0.25rem;
+      cursor: pointer;
+      color: var(--gray-500);
+      transition: transform 0.2s;
+      vertical-align: middle;
+      user-select: none;
+    }
+    .shortfall-expand::before { content: '\25B6'; font-size: 0.65rem; }
+    .shortfall-expand:hover { color: var(--gray-300); }
+    .shortfall-expand-open { transform: rotate(90deg); }
+    .shortfall-detail-row { display: none; }
+    .shortfall-detail-row.shortfall-detail-visible { display: table-row; }
+    .shortfall-detail-cell {
+      padding: 0.5rem 1rem 0.75rem 2.25rem !important;
+      background: var(--panel-bg);
+      border-bottom: 1px solid var(--border);
+      color: var(--gray-400);
+      font-size: 0.875rem;
+    }
+    .shortfall-consumed-by-label { margin-right: 0.5rem; color: var(--gray-500); }
+    .shortfall-consumed-by-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      margin-right: 1rem;
+      white-space: nowrap;
+    }
+    .shortfall-consumed-by-item .mono { color: var(--accent-green); margin-left: 0.25rem; }
 
     /* ===== Search Bar ===== */
     .search-wrapper { position: relative; flex: 1; max-width: 28rem; }
@@ -1322,6 +1353,7 @@ function analyze(jsonContent) {
 
   // Consumption and shortfalls: from recipe inputs and building production rates
   const consumption = new Map(); // itemName -> consumed per minute
+  const consumptionBreakdown = new Map(); // itemName -> Map<producerItemName, totalRate>
   const itemsByName = new Map();
   for (const it of data.Items) {
     let n = it.ItemName;
@@ -1337,8 +1369,12 @@ function analyze(jsonContent) {
     if (!itemDef || !itemDef.AmountProduced || itemDef.AmountProduced <= 0) continue;
     const craftsPerMin = p.producedPerMinute / itemDef.AmountProduced;
     for (const inp of recipe) {
+      const rate = inp.amount * craftsPerMin;
       const cur = consumption.get(inp.itemName) || 0;
-      consumption.set(inp.itemName, cur + inp.amount * craftsPerMin);
+      consumption.set(inp.itemName, cur + rate);
+      let byType = consumptionBreakdown.get(inp.itemName);
+      if (!byType) { byType = new Map(); consumptionBreakdown.set(inp.itemName, byType); }
+      byType.set(p.producedItem, (byType.get(p.producedItem) || 0) + rate);
     }
   }
   const shortfalls = [];
@@ -1349,11 +1385,14 @@ function analyze(jsonContent) {
     const consumedPerMin = consumption.get(itemName) || 0;
     if (consumedPerMin <= 0) continue; // only show items that are consumed (have demand)
     const shortfall = Math.round((consumedPerMin - producedPerMin) * 100) / 100;
+    const byType = consumptionBreakdown.get(itemName);
+    const consumedBy = byType ? [...byType.entries()].map(([producerItemName, rate]) => ({ producerItemName, rate: Math.round(rate * 100) / 100 })).sort((a, b) => b.rate - a.rate) : [];
     shortfalls.push({
       name: itemName,
       produced: Math.round(producedPerMin * 100) / 100,
       consumed: Math.round(consumedPerMin * 100) / 100,
-      shortfall
+      shortfall,
+      consumedBy
     });
   }
   shortfalls.sort((a, b) => b.shortfall - a.shortfall);
@@ -1941,13 +1980,48 @@ function renderShortfallsTab(container) {
   } else {
     for (const row of shortfalls) {
       const tr = document.createElement('tr');
-      if (row.shortfall > 0) tr.classList.add('shortfall-row');
+      tr.className = 'shortfall-main-row' + (row.shortfall > 0 ? ' shortfall-row' : '');
+      const consumedBy = row.consumedBy || [];
+      const hasBreakdown = consumedBy.length > 0;
+      const expandIcon = hasBreakdown
+        ? '<span class="shortfall-expand" role="button" tabindex="0" aria-expanded="false" title="Show what consumes this item"></span>'
+        : '';
       tr.innerHTML = `
-        <td class="left" style="color:var(--gray-100);font-weight:500"><span class="name-with-icon">${itemIconHTML(row.name)}${esc(row.name)}</span></td>
+        <td class="left" style="color:var(--gray-100);font-weight:500">
+          ${expandIcon}
+          <span class="name-with-icon">${itemIconHTML(row.name)}${esc(row.name)}</span>
+        </td>
         <td class="right mono">${row.produced.toLocaleString()}</td>
         <td class="right mono">${row.consumed.toLocaleString()}</td>
         <td class="right mono ${row.shortfall > 0 ? 'color-red' : ''}">${(-(row.shortfall)).toLocaleString()}</td>`;
       tbody.appendChild(tr);
+
+      if (hasBreakdown) {
+        const detailTr = document.createElement('tr');
+        detailTr.className = 'shortfall-detail-row';
+        const cell = document.createElement('td');
+        cell.colSpan = 4;
+        cell.className = 'shortfall-detail-cell';
+        const list = consumedBy.map(c =>
+          `<span class="shortfall-consumed-by-item"><span class="name-with-icon">${itemIconHTML(c.producerItemName)}${esc(c.producerItemName)}</span><span class="mono"> ${c.rate.toLocaleString()}/min</span></span>`
+        ).join('');
+        cell.innerHTML = `<div class="shortfall-consumed-by"><span class="shortfall-consumed-by-label">Consumed by:</span> ${list}</div>`;
+        detailTr.appendChild(cell);
+        tbody.appendChild(detailTr);
+
+        const expandEl = tr.querySelector('.shortfall-expand');
+        expandEl.addEventListener('click', () => {
+          const open = detailTr.classList.toggle('shortfall-detail-visible');
+          expandEl.setAttribute('aria-expanded', String(open));
+          expandEl.classList.toggle('shortfall-expand-open', open);
+        });
+        expandEl.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            expandEl.click();
+          }
+        });
+      }
     }
   }
   table.appendChild(tbody);
