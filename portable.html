@@ -190,6 +190,8 @@
     .color-blue { color: var(--accent-blue); }
     .color-green { color: var(--accent-green); }
     .color-amber { color: var(--accent-amber); }
+    .color-red { color: #ef4444; }
+    tr.shortfall-row { background: rgba(239, 68, 68, 0.08); }
 
     /* ===== Search Bar ===== */
     .search-wrapper { position: relative; flex: 1; max-width: 28rem; }
@@ -661,6 +663,68 @@ const ITEMS_DATA = {
     "I_WolframOrePure": "Wolfram Ore (Pure)", "I_WolframPlate": "Wolfram Plate",
     "I_WolframPowder": "Wolfram Powder", "I_WolframWire": "Wolfram Wire"
   }
+};
+
+// Recipe inputs: for each output item, list of { itemName, amount } consumed per one craft (AmountProduced units of output).
+// Used to compute consumption demand and production shortfalls. Extend this map as more recipe data is available.
+const RECIPE_INPUTS = {
+  "Accumulator": [
+    { itemName: "Calcium Ore", amount: 20 }, { itemName: "Helium-3", amount: 8 },
+    { itemName: "Sulfur Ore", amount: 4 }, { itemName: "Titanium Ore", amount: 44 },
+    { itemName: "Wolfram Ore", amount: 26 }
+  ],
+  "Basic Building Material": [
+    { itemName: "Titanium Ore", amount: 1 }, { itemName: "Wolfram Ore", amount: 1 }
+  ],
+  "Battery": [
+    { itemName: "Calcium Ore", amount: 12 }, { itemName: "Helium-3", amount: 4 },
+    { itemName: "Sulfur Ore", amount: 2 }, { itemName: "Titanium Ore", amount: 16 },
+    { itemName: "Wolfram Ore", amount: 16 }
+  ],
+  "Calcium Block": [ { itemName: "Calcium Ore", amount: 2 } ],
+  "Titanium Bar": [ { itemName: "Titanium Ore", amount: 2 } ],
+  "Wolfram Bar": [ { itemName: "Wolfram Ore", amount: 2 } ],
+  "Calcium Powder": [ { itemName: "Calcium Block", amount: 2 } ],
+  "Calcite Sheets": [ { itemName: "Calcium Ore", amount: 2 } ],
+  "Ceramics": [ { itemName: "Calcite Sheets", amount: 2 }, { itemName: "Wolfram Powder", amount: 1 } ],
+  "Electromagnet": [ { itemName: "Electromagnetic Coil", amount: 1 }, { itemName: "Inductor", amount: 1 } ],
+  "Electromagnetic Coil": [ { itemName: "Wolfram Wire", amount: 2 } ],
+  "Electronics": [ { itemName: "Synthetic Silicon", amount: 2 }, { itemName: "Inductor", amount: 1 }, { itemName: "Stator", amount: 1 } ],
+  "Glass": [ { itemName: "Helium-3", amount: 2 }, { itemName: "Calcium Powder", amount: 1 } ],
+  "Inductor": [ { itemName: "Ceramics", amount: 1 }, { itemName: "Tube", amount: 1 }, { itemName: "Wolfram Wire", amount: 1 } ],
+  "Liquid Helium": [ { itemName: "Helium-3", amount: 4 }, { itemName: "Pressurized Helium", amount: 1 } ],
+  "Pressurized Helium": [ { itemName: "Helium-3", amount: 4 } ],
+  "Rotor": [ { itemName: "Titanium Rod", amount: 2 }, { itemName: "Wolfram Wire", amount: 2 } ],
+  "Stator": [ { itemName: "Titanium Housing", amount: 2 }, { itemName: "Wolfram Wire", amount: 2 } ],
+  "Sulfuric Acid": [ { itemName: "Sulfur Ore", amount: 2 } ],
+  "Superconductor": [ { itemName: "Wolfram Wire", amount: 2 }, { itemName: "Liquid Helium", amount: 1 } ],
+  "Synthetic Resin": [ { itemName: "Chemicals", amount: 1 }, { itemName: "Synthetic Silicon", amount: 1 } ],
+  "Synthetic Silicon": [ { itemName: "Ceramics", amount: 2 }, { itemName: "Calcium Powder", amount: 1 }, { itemName: "Helium-3", amount: 2 } ],
+  "Titanium Beam": [ { itemName: "Titanium Bar", amount: 2 } ],
+  "Titanium Housing": [ { itemName: "Titanium Sheet", amount: 2 }, { itemName: "Titanium Beam", amount: 1 } ],
+  "Titanium Rod": [ { itemName: "Titanium Bar", amount: 1 } ],
+  "Titanium Sheet": [ { itemName: "Titanium Bar", amount: 2 } ],
+  "Tube": [ { itemName: "Titanium Sheet", amount: 2 }, { itemName: "Titanium Rod", amount: 1 } ],
+  "Wolfram Plate": [ { itemName: "Wolfram Bar", amount: 2 } ],
+  "Wolfram Powder": [ { itemName: "Wolfram Ore", amount: 2 } ],
+  "Wolfram Wire": [ { itemName: "Wolfram Bar", amount: 1 } ],
+  "Chemicals": [ { itemName: "Synthetic Silicon", amount: 2 }, { itemName: "Wolfram Powder", amount: 1 }, { itemName: "Helium-3", amount: 2 } ],
+  "Heat Resistant Sheet": [ { itemName: "Wolfram Plate", amount: 1 }, { itemName: "Titanium Sheet", amount: 1 }, { itemName: "Glass", amount: 1 } ],
+  "Nanofiber": [ { itemName: "Synthetic Resin", amount: 1 }, { itemName: "Chemicals", amount: 1 } ],
+  "Nozzle": [ { itemName: "Titanium Housing", amount: 1 }, { itemName: "Tube", amount: 1 } ],
+  "Pump": [ { itemName: "Titanium Housing", amount: 1 }, { itemName: "Rotor", amount: 1 }, { itemName: "Nozzle", amount: 1 } ],
+  "Condenser": [ { itemName: "Pressure Tank", amount: 1 }, { itemName: "Pump", amount: 1 }, { itemName: "Liquid Helium", amount: 2 } ],
+  "Generator": [ { itemName: "Electromagnet", amount: 2 }, { itemName: "Rotor", amount: 1 }, { itemName: "Stator", amount: 1 } ],
+  "Resonator": [ { itemName: "Electromagnet", amount: 1 }, { itemName: "Electronics", amount: 1 } ],
+  "Laser Emitter": [ { itemName: "Electronics", amount: 1 }, { itemName: "Lens", amount: 1 }, { itemName: "Resonator", amount: 1 } ],
+  "Lens": [ { itemName: "Glass", amount: 2 }, { itemName: "Superconductor", amount: 1 } ],
+  "Pressure Tank": [ { itemName: "Titanium Sheet", amount: 2 }, { itemName: "Tube", amount: 2 } ],
+  "Turbine": [ { itemName: "Nozzle", amount: 1 }, { itemName: "Rotor", amount: 2 }, { itemName: "Stator", amount: 1 } ],
+  "Valve": [ { itemName: "Titanium Housing", amount: 1 }, { itemName: "Tube", amount: 1 } ],
+  "Stabilizer": [ { itemName: "Rotor", amount: 2 }, { itemName: "Titanium Rod", amount: 2 } ],
+  "Scanner": [ { itemName: "Electronics", amount: 2 }, { itemName: "Lens", amount: 1 }, { itemName: "Resonator", amount: 1 } ],
+  "Applicator": [ { itemName: "Tube", amount: 2 }, { itemName: "Glass", amount: 1 } ],
+  "Intermediate Building Material": [ { itemName: "Basic Building Material", amount: 10 }, { itemName: "Glass", amount: 2 }, { itemName: "Inductor", amount: 2 } ]
 };
 
 const CATEGORY_ORDER = [
@@ -1256,6 +1320,44 @@ function analyze(jsonContent) {
   }
   productionArr.sort((a, b) => a.name.localeCompare(b.name));
 
+  // Consumption and shortfalls: from recipe inputs and building production rates
+  const consumption = new Map(); // itemName -> consumed per minute
+  const itemsByName = new Map();
+  for (const it of data.Items) {
+    let n = it.ItemName;
+    const paren = n.indexOf('(');
+    if (paren > 0) n = n.substring(0, paren).trim();
+    itemsByName.set(n, it);
+  }
+  for (const p of buildingPositions) {
+    if (!p.producedItem || (p.producedPerMinute || 0) <= 0) continue;
+    const recipe = RECIPE_INPUTS[p.producedItem];
+    if (!recipe || !Array.isArray(recipe)) continue;
+    const itemDef = itemsByName.get(p.producedItem);
+    if (!itemDef || !itemDef.AmountProduced || itemDef.AmountProduced <= 0) continue;
+    const craftsPerMin = p.producedPerMinute / itemDef.AmountProduced;
+    for (const inp of recipe) {
+      const cur = consumption.get(inp.itemName) || 0;
+      consumption.set(inp.itemName, cur + inp.amount * craftsPerMin);
+    }
+  }
+  const shortfalls = [];
+  const allItemNames = new Set([...production.keys(), ...consumption.keys()]);
+  for (const itemName of allItemNames) {
+    const produced = production.get(itemName);
+    const producedPerMin = produced ? produced.perMinute : 0;
+    const consumedPerMin = consumption.get(itemName) || 0;
+    if (consumedPerMin <= 0) continue; // only show items that are consumed (have demand)
+    const shortfall = Math.round((consumedPerMin - producedPerMin) * 100) / 100;
+    shortfalls.push({
+      name: itemName,
+      produced: Math.round(producedPerMin * 100) / 100,
+      consumed: Math.round(consumedPerMin * 100) / 100,
+      shortfall
+    });
+  }
+  shortfalls.sort((a, b) => b.shortfall - a.shortfall);
+
   const storageArr = [];
   for (const [name, count] of storage) storageArr.push({ name, count });
   storageArr.sort((a, b) => a.name.localeCompare(b.name));
@@ -1475,7 +1577,8 @@ function analyze(jsonContent) {
   return {
     buildingCategories, production: productionArr, storage: storageArr,
     buildingPositions, transportConnections, droneCarriers, productionByArea,
-    totals: { buildings: totalBuildings, productionItems: productionArr.length, storedItems: totalStoredItems }
+    shortfalls,
+    totals: { buildings: totalBuildings, productionItems: productionArr.length, storedItems: totalStoredItems, shortfalls: shortfalls.length }
   };
 }
 
@@ -1531,6 +1634,11 @@ function renderAnalysisView() {
       h('div', { className: 'summary-value color-green' }, String(data.totals.productionItems)),
       h('div', { className: 'summary-sub' }, 'active recipes')
     ),
+    h('div', { className: 'summary-card', onclick: () => switchTab('shortfalls') },
+      h('div', { className: 'summary-label' }, 'Shortfalls'),
+      h('div', { className: 'summary-value', style: 'color:#ef4444' }, String((data.shortfalls || []).filter(s => s.shortfall > 0).length)),
+      h('div', { className: 'summary-sub' }, 'items under demand')
+    ),
     h('div', { className: 'summary-card', onclick: () => switchTab('storage') },
       h('div', { className: 'summary-label' }, 'Stored Items'),
       h('div', { className: 'summary-value color-amber' }, data.totals.storedItems.toLocaleString()),
@@ -1572,6 +1680,7 @@ function renderTabs() {
   const tabs = [
     { id: 'buildings', label: 'Buildings', count: data.totals.buildings },
     { id: 'production', label: 'Production', count: data.totals.productionItems },
+    { id: 'shortfalls', label: 'Shortfalls', count: (data.shortfalls || []).filter(s => s.shortfall > 0).length },
     { id: 'storage', label: 'Storage', count: data.storage.length },
   ];
   if (data.buildingPositions && data.buildingPositions.length > 0) {
@@ -1607,6 +1716,7 @@ function renderTabContent() {
 
   if (activeTab === 'buildings') renderBuildingsTab(container);
   else if (activeTab === 'production') renderProductionTab(container);
+  else if (activeTab === 'shortfalls') renderShortfallsTab(container);
   else if (activeTab === 'storage') renderStorageTab(container);
   else if (activeTab === 'map') renderMapTab(container);
   else if (activeTab === 'drones') renderDronesTab(container);
@@ -1788,6 +1898,60 @@ function renderProductionTab(container) {
     panel.appendChild(h('div', { className: 'empty-msg' }, 'No items match your search'));
   }
 
+  container.appendChild(panel);
+}
+
+// ===== Shortfalls Tab =====
+function renderShortfallsTab(container) {
+  const shortfalls = analysisData.shortfalls || [];
+  const inShortfall = shortfalls.filter(s => s.shortfall > 0);
+
+  const intro = h('div', { className: 'shortfalls-intro', style: 'margin-bottom:1rem;color:var(--gray-400);font-size:0.875rem' },
+    'Demand is computed from recipe inputs and current building production rates. Items with consumption greater than production are in shortfall.'
+  );
+  container.appendChild(intro);
+
+  const toolbar = h('div', { className: 'toolbar' },
+    h('div', { className: 'toolbar-stats' },
+      h('span', { className: 'stat-value', style: 'color:#ef4444' }, String(inShortfall.length)),
+      ' in shortfall',
+      shortfalls.length > 0 ? h('span', { style: 'color:var(--gray-500);margin-left:0.75rem' }, `\u00B7 ${shortfalls.length} items with demand`) : null
+    )
+  );
+  container.appendChild(toolbar);
+
+  const panel = h('div', { className: 'panel' });
+  const table = document.createElement('table');
+  const thead = document.createElement('thead');
+  thead.innerHTML = `
+    <tr>
+      <th class="left">Item</th>
+      <th class="right">Produced /min</th>
+      <th class="right">Consumed /min</th>
+      <th class="right">Surplus /min</th>
+    </tr>`;
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  tbody.className = 'divide';
+  if (shortfalls.length === 0) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td colspan="4" class="empty-msg" style="text-align:center;padding:2rem;color:var(--gray-500)">No demand data. Recipe inputs are used to compute consumption; add more buildings with recipes to see shortfalls.</td>';
+    tbody.appendChild(tr);
+  } else {
+    for (const row of shortfalls) {
+      const tr = document.createElement('tr');
+      if (row.shortfall > 0) tr.classList.add('shortfall-row');
+      tr.innerHTML = `
+        <td class="left" style="color:var(--gray-100);font-weight:500"><span class="name-with-icon">${itemIconHTML(row.name)}${esc(row.name)}</span></td>
+        <td class="right mono">${row.produced.toLocaleString()}</td>
+        <td class="right mono">${row.consumed.toLocaleString()}</td>
+        <td class="right mono ${row.shortfall > 0 ? 'color-red' : ''}">${(-(row.shortfall)).toLocaleString()}</td>`;
+      tbody.appendChild(tr);
+    }
+  }
+  table.appendChild(tbody);
+  panel.appendChild(table);
   container.appendChild(panel);
 }
 
