@@ -407,6 +407,32 @@
       cursor: pointer;
     }
     .map-toolbar button:hover { background: var(--dark-600); color: var(--gray-100); }
+    .map-view-radio {
+      display: flex; align-items: center; gap: 0.75rem; margin-left: 0.5rem;
+    }
+    .map-view-radio input[type="radio"] { accent-color: var(--accent-blue); cursor: pointer; }
+    .map-view-radio label { font-size: 0.8rem; color: var(--gray-400); cursor: pointer; }
+    .map-production-by-area { overflow-y: auto; max-height: 70vh; }
+    .map-production-area-section {
+      margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--dark-600);
+    }
+    .map-production-area-section:last-child { border-bottom: none; }
+    .map-production-area-toggle {
+      display: flex; align-items: center; gap: 0.5rem; cursor: pointer; margin-bottom: 0.2rem;
+    }
+    .map-production-area-toggle input[type="checkbox"] { flex-shrink: 0; cursor: pointer; accent-color: var(--accent-blue); }
+    .map-production-area-section.area-disabled .map-production-area-body { display: none; }
+    .map-production-area-section.area-disabled .map-production-area-title { color: var(--gray-500); }
+    .map-production-area-section.area-highlighted {
+      background: rgba(34,197,94,0.15); border-left: 3px solid #22c55e; margin-left: -2px; padding-left: 0.25rem;
+    }
+    .map-production-area-title { font-size: 0.8rem; font-weight: 600; color: var(--gray-300); }
+    .map-production-area-body { margin-top: 0.15rem; }
+    .map-production-area-total { font-size: 0.75rem; color: var(--green-400); margin-bottom: 0.35rem; }
+    .map-production-area-table { width: 100%; font-size: 0.75rem; }
+    .map-production-area-table th { text-align: left; color: var(--gray-500); font-weight: 500; padding: 0.2rem 0; }
+    .map-production-area-table td { padding: 0.15rem 0; color: var(--gray-400); }
+    .map-production-area-table .right { text-align: right; }
     .map-hover-label {
       position: absolute; pointer-events: none;
       padding: 0.35rem 0.6rem; border-radius: 0.25rem;
@@ -736,6 +762,9 @@ let mapTranslateY = 0;
 let mapDragStart = null;
 const MAP_DEFAULT_VISIBLE_CATEGORY = 'Crafting';
 let mapBuildingVisibility = {};
+let mapViewMode = 'buildings'; // 'buildings' | 'production'
+let mapAreaVisibility = {}; // area id -> true/false; default true when undefined
+let mapHighlightedAreaId = null; // area id highlighted in legend when clicking area on map
 
 // StarRuptureMap-style world-to-SVG transform (from StarRuptureMap main.go)
 // Go uses full SVG 4352x5120; playable area is (380,567) to (3927,4038). We use content-only viewBox.
@@ -750,6 +779,8 @@ const MAP_CONTENT_HEIGHT = MAP_DST_Y2 - MAP_DST_Y1;
 const MAP_IMAGE_WIDTH = 4352;
 const MAP_IMAGE_HEIGHT = 5120;
 const BASE_MAP_URL = 'https://raw.githubusercontent.com/bithoarder/StarRuptureMap/main/base_map.webp';
+// Base core build area: axis-aligned square in world units (half of side length). Game uses this to limit where you can build.
+const BASE_CORE_BUILD_HALF_EXTENT = 10000;
 
 function worldToMapCoords(worldX, worldY) {
   return {
@@ -1107,6 +1138,7 @@ function analyze(jsonContent) {
       }
       if (!displayName) displayName = extractDisplayName(entityValue, spawnData);
       let producedItem = null;
+      let producedPerMinute = 0;
       if (!buildingDef.IsStorage && Array.isArray(fragmentValues)) {
         for (const fragmentValue of fragmentValues) {
           const f = String(fragmentValue);
@@ -1119,6 +1151,9 @@ function analyze(jsonContent) {
             const parenIdx = itemName.indexOf('(');
             if (parenIdx > 0) itemName = itemName.substring(0, parenIdx).trim();
             producedItem = itemName;
+            if (itemDef.AmountProduced > 0 && itemDef.Seconds > 0) {
+              producedPerMinute = itemDef.AmountProduced * (60 / itemDef.Seconds);
+            }
             break;
           }
         }
@@ -1130,7 +1165,8 @@ function analyze(jsonContent) {
         x: pos.x, y: pos.y, z: pos.z,
         scaleX, scaleY,
         displayName: displayName || undefined,
-        producedItem: producedItem || undefined
+        producedItem: producedItem || undefined,
+        producedPerMinute: producedPerMinute || undefined
       });
     }
 
@@ -1284,9 +1320,97 @@ function analyze(jsonContent) {
     }
   } catch (_) {}
 
+  // Production by area: use axis-aligned square (BASE_CORE_BUILD_HALF_EXTENT) so totals and map match the game's build limit
+  const baseCores = buildingPositions.filter(p => p.name === 'Base Core');
+  const halfExt = BASE_CORE_BUILD_HALF_EXTENT;
+  function insideSquare(px, py, cx, cy) {
+    return Math.abs(px - cx) <= halfExt && Math.abs(py - cy) <= halfExt;
+  }
+  for (const p of buildingPositions) {
+    if (baseCores.length > 0) {
+      const inside = [];
+      for (let i = 0; i < baseCores.length; i++) {
+        if (insideSquare(p.x, p.y, baseCores[i].x, baseCores[i].y)) inside.push(i);
+      }
+      if (inside.length > 0) {
+        let bestIdx = inside[0];
+        let bestD2 = Infinity;
+        for (const i of inside) {
+          const dx = p.x - baseCores[i].x, dy = p.y - baseCores[i].y;
+          const d2 = dx * dx + dy * dy;
+          if (d2 < bestD2) { bestD2 = d2; bestIdx = i; }
+        }
+        p.areaId = bestIdx;
+      } else {
+        p.areaId = null; // outside all squares; not counted in any area total
+      }
+    } else {
+      p.areaId = 0;
+    }
+  }
+  const productionByArea = [];
+  if (baseCores.length > 0) {
+    const areaProduction = baseCores.map((bc, i) => ({
+      id: i,
+      label: (bc.displayName && bc.displayName.trim()) ? bc.displayName.trim() : ('Area ' + (i + 1)),
+      x: bc.x, y: bc.y,
+      items: new Map(),
+      totalPerMinute: 0
+    }));
+    // Only count production from buildings inside each area's square (same square as drawn on map)
+    for (const p of buildingPositions) {
+      if (!p.producedItem || (p.producedPerMinute || 0) <= 0) continue;
+      let bestIdx = -1;
+      let bestD2 = Infinity;
+      for (let i = 0; i < baseCores.length; i++) {
+        if (!insideSquare(p.x, p.y, baseCores[i].x, baseCores[i].y)) continue;
+        const dx = p.x - baseCores[i].x, dy = p.y - baseCores[i].y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < bestD2) { bestD2 = d2; bestIdx = i; }
+      }
+      if (bestIdx >= 0) {
+        const area = areaProduction[bestIdx];
+        const cur = area.items.get(p.producedItem) || 0;
+        area.items.set(p.producedItem, cur + (p.producedPerMinute || 0));
+        area.totalPerMinute += p.producedPerMinute || 0;
+      }
+    }
+    for (const area of areaProduction) {
+      const itemArr = [...area.items.entries()]
+        .map(([name, perMinute]) => ({ name, perMinute: Math.round(perMinute * 100) / 100 }))
+        .sort((a, b) => b.perMinute - a.perMinute);
+      productionByArea.push({
+        id: area.id,
+        label: area.label,
+        x: area.x, y: area.y,
+        items: itemArr,
+        totalPerMinute: Math.round(area.totalPerMinute * 100) / 100
+      });
+    }
+  } else {
+    // No base cores: single "Entire map" area
+    const items = new Map();
+    for (const p of buildingPositions) {
+      if (!p.producedItem || (p.producedPerMinute || 0) <= 0) continue;
+      const cur = items.get(p.producedItem) || 0;
+      items.set(p.producedItem, cur + (p.producedPerMinute || 0));
+    }
+    const itemArr = [...items.entries()]
+      .map(([name, perMinute]) => ({ name, perMinute: Math.round(perMinute * 100) / 100 }))
+      .sort((a, b) => b.perMinute - a.perMinute);
+    const total = itemArr.reduce((s, i) => s + i.perMinute, 0);
+    productionByArea.push({
+      id: 0,
+      label: 'Entire map',
+      x: null, y: null,
+      items: itemArr,
+      totalPerMinute: Math.round(total * 100) / 100
+    });
+  }
+
   return {
     buildingCategories, production: productionArr, storage: storageArr,
-    buildingPositions, transportConnections, droneCarriers,
+    buildingPositions, transportConnections, droneCarriers, productionByArea,
     totals: { buildings: totalBuildings, productionItems: productionArr.length, storedItems: totalStoredItems }
   };
 }
@@ -1753,15 +1877,11 @@ function renderDronesTab(container) {
 }
 
 // ===== Map Tab (StarRuptureMap-style: fixed viewBox, base map, transport lines) =====
-let mapTransportLinesVisible = true;
 let mapDronesItemFilter = null;
 let mapDroneCarrierItemFilter = null;
 function renderMapTab(container) {
   const positions = analysisData.buildingPositions || [];
   const transportConnections = analysisData.transportConnections || [];
-  mapScale = 1;
-  mapTranslateX = 0;
-  mapTranslateY = 0;
   if (positions.length === 0) {
     container.appendChild(h('div', { className: 'empty-msg' }, 'No building location data in this save.'));
     return;
@@ -1787,6 +1907,38 @@ function renderMapTab(container) {
     renderTabContent();
   });
   toolbar.appendChild(resetBtn);
+  const viewRadioWrap = h('div', { className: 'map-view-radio' });
+  const buildingsRadio = document.createElement('input');
+  buildingsRadio.type = 'radio';
+  buildingsRadio.name = 'mapView';
+  buildingsRadio.id = 'mapViewBuildings';
+  buildingsRadio.checked = (mapViewMode === 'buildings');
+  buildingsRadio.addEventListener('change', () => { mapViewMode = 'buildings'; renderTabContent(); });
+  const prodRadio = document.createElement('input');
+  prodRadio.type = 'radio';
+  prodRadio.name = 'mapView';
+  prodRadio.id = 'mapViewProduction';
+  prodRadio.checked = (mapViewMode === 'production');
+  prodRadio.addEventListener('change', () => {
+    mapViewMode = 'production';
+    const positions = analysisData.buildingPositions || [];
+    const productionCategories = new Set(['Ore Processing', 'Extraction', 'Crafting']);
+    positions.forEach(p => {
+      if (productionCategories.has(p.category)) mapBuildingVisibility[p.name] = true;
+    });
+    renderTabContent();
+  });
+  const buildingsLabel = document.createElement('label');
+  buildingsLabel.htmlFor = 'mapViewBuildings';
+  buildingsLabel.textContent = 'Buildings';
+  const prodLabel = document.createElement('label');
+  prodLabel.htmlFor = 'mapViewProduction';
+  prodLabel.textContent = 'Production';
+  viewRadioWrap.appendChild(buildingsRadio);
+  viewRadioWrap.appendChild(buildingsLabel);
+  viewRadioWrap.appendChild(prodRadio);
+  viewRadioWrap.appendChild(prodLabel);
+  toolbar.appendChild(viewRadioWrap);
   wrapper.appendChild(toolbar);
 
   const mapDiv = h('div', { className: 'map-container', id: 'mapContainer' });
@@ -1828,16 +1980,27 @@ function renderMapTab(container) {
   function setDroneLinesVisibility() {
     const grp = document.getElementById('mapTransportLines');
     if (!grp) return;
-    grp.style.display = mapTransportLinesVisible ? '' : 'none';
-    if (mapTransportLinesVisible) {
-      for (let i = 0; i < grp.children.length; i++) {
-        const line = grp.children[i];
-        const item = line.getAttribute('data-item');
-        line.style.display = (mapDronesItemFilter == null || mapDronesItemFilter === '' || item === mapDronesItemFilter) ? '' : 'none';
-      }
+    if (mapViewMode === 'production') {
+      grp.style.display = 'none';
+      return;
+    }
+    grp.style.display = '';
+    for (let i = 0; i < grp.children.length; i++) {
+      const line = grp.children[i];
+      const item = line.getAttribute('data-item');
+      line.style.display = (mapDronesItemFilter == null || mapDronesItemFilter === '' || item === mapDronesItemFilter) ? '' : 'none';
     }
   }
-  setDroneLinesVisibility();
+  if (mapViewMode === 'production') {
+    linesGrp.style.display = 'none';
+  } else {
+    linesGrp.style.display = '';
+    for (let i = 0; i < linesGrp.children.length; i++) {
+      const line = linesGrp.children[i];
+      const item = line.getAttribute('data-item');
+      line.style.display = (mapDronesItemFilter == null || mapDronesItemFilter === '' || item === mapDronesItemFilter) ? '' : 'none';
+    }
+  }
   g.appendChild(linesGrp);
 
   const droneCarriers = analysisData.droneCarriers || [];
@@ -1860,7 +2023,7 @@ function renderMapTab(container) {
   function setDroneCarrierMarkersVisibility() {
     const grp = document.getElementById('mapDroneCarrierMarkers');
     if (!grp) return;
-    if (mapDroneCarrierItemFilter == null || mapDroneCarrierItemFilter === '') {
+    if (mapViewMode === 'production' || mapDroneCarrierItemFilter == null || mapDroneCarrierItemFilter === '') {
       grp.style.display = 'none';
       return;
     }
@@ -1871,9 +2034,23 @@ function renderMapTab(container) {
       el.style.display = (showAll || el.getAttribute('data-item') === mapDroneCarrierItemFilter) ? '' : 'none';
     }
   }
-  setDroneCarrierMarkersVisibility();
+  if (mapViewMode === 'production' || mapDroneCarrierItemFilter == null || mapDroneCarrierItemFilter === '') {
+    droneMarkersGrp.style.display = 'none';
+  } else {
+    droneMarkersGrp.style.display = '';
+    const showAll = (mapDroneCarrierItemFilter === MAP_CARRIER_SHOW_ALL);
+    for (let i = 0; i < droneMarkersGrp.children.length; i++) {
+      const el = droneMarkersGrp.children[i];
+      el.style.display = (showAll || el.getAttribute('data-item') === mapDroneCarrierItemFilter) ? '' : 'none';
+    }
+  }
   g.appendChild(droneMarkersGrp);
 
+  const buildingRectsGrp = document.createElementNS(svgNs, 'g');
+  buildingRectsGrp.id = 'mapBuildingRects';
+  buildingRectsGrp.style.display = '';
+
+  const MAP_PRODUCTION_CATEGORIES = new Set(['Ore Processing', 'Extraction', 'Crafting']);
   const byName = {};
   positions.forEach(p => {
     byName[p.name] = (byName[p.name] || 0) + 1;
@@ -1891,7 +2068,16 @@ function renderMapTab(container) {
     for (let i = 0; i < grp.children.length; i++) {
       const el = grp.children[i];
       const name = el.getAttribute('data-name');
-      if (name != null) el.style.display = visibilityMap[name] !== false ? '' : 'none';
+      const category = el.getAttribute('data-category');
+      const areaIdStr = el.getAttribute('data-area-id');
+      const areaId = areaIdStr != null ? Number(areaIdStr) : null;
+      if (name == null) continue;
+      if (mapViewMode === 'production') {
+        const areaVisible = areaId != null && mapAreaVisibility[areaId] !== false;
+        el.style.display = (MAP_PRODUCTION_CATEGORIES.has(category) && areaVisible) ? '' : 'none';
+      } else {
+        el.style.display = visibilityMap[name] !== false ? '' : 'none';
+      }
     }
   }
   positions.forEach(p => {
@@ -1907,10 +2093,51 @@ function renderMapTab(container) {
     rect.setAttribute('stroke-width', '0.5');
     rect.setAttribute('data-name', p.name);
     rect.setAttribute('data-category', p.category);
+    if (p.areaId != null) rect.setAttribute('data-area-id', String(p.areaId));
     rect.style.cursor = 'pointer';
-    rect.style.display = mapBuildingVisibility[p.name] !== false ? '' : 'none';
-    g.appendChild(rect);
+    rect.style.display = mapViewMode === 'production'
+      ? (p.areaId != null && MAP_PRODUCTION_CATEGORIES.has(p.category) && mapAreaVisibility[p.areaId] !== false ? '' : 'none')
+      : (mapBuildingVisibility[p.name] !== false ? '' : 'none');
+    buildingRectsGrp.appendChild(rect);
   });
+  g.appendChild(buildingRectsGrp);
+
+  const productionByArea = analysisData.productionByArea || [];
+  productionByArea.forEach(a => {
+    if (mapAreaVisibility[a.id] === undefined) mapAreaVisibility[a.id] = true;
+  });
+  const areaMarkersGrp = document.createElementNS(svgNs, 'g');
+  areaMarkersGrp.id = 'mapAreaMarkers';
+  areaMarkersGrp.style.display = mapViewMode === 'production' ? '' : 'none';
+  const halfExt = BASE_CORE_BUILD_HALF_EXTENT;
+  productionByArea.forEach(area => {
+    if (area.x == null || area.y == null) return;
+    const topLeft = worldToMapCoords(area.x - halfExt, area.y - halfExt);
+    const bottomRight = worldToMapCoords(area.x + halfExt, area.y + halfExt);
+    const w = bottomRight.x - topLeft.x;
+    const h = bottomRight.y - topLeft.y;
+    const rect = document.createElementNS(svgNs, 'rect');
+    rect.setAttribute('x', topLeft.x);
+    rect.setAttribute('y', topLeft.y);
+    rect.setAttribute('width', w);
+    rect.setAttribute('height', h);
+    rect.setAttribute('fill', 'rgba(34,197,94,0.2)');
+    rect.setAttribute('stroke', '#22c55e');
+    rect.setAttribute('stroke-width', '2');
+    rect.setAttribute('data-area-id', String(area.id));
+    rect.style.cursor = 'pointer';
+    rect.style.display = mapAreaVisibility[area.id] !== false ? '' : 'none';
+    rect.setAttribute('pointer-events', 'all');
+    rect.addEventListener('mousedown', (e) => e.stopPropagation());
+    rect.addEventListener('click', (e) => {
+      e.stopPropagation();
+      mapHighlightedAreaId = (mapHighlightedAreaId === area.id) ? null : area.id;
+      renderTabContent();
+    });
+    areaMarkersGrp.appendChild(rect);
+  });
+  g.appendChild(areaMarkersGrp);
+
   svg.appendChild(g);
   mapDiv.appendChild(svg);
 
@@ -1951,9 +2178,8 @@ function renderMapTab(container) {
   function hideHoverLabel() {
     hoverLabel.classList.remove('visible');
   }
-  const rectOffset = 3; // g has image, linesGrp, droneMarkersGrp, then rects
   positions.forEach((p, i) => {
-    const rect = g.children[rectOffset + i];
+    const rect = buildingRectsGrp.children[i];
     if (!rect) return;
     rect.addEventListener('mouseenter', (e) => {
       showHoverLabel(p.name, p.category, e.clientX, e.clientY, p.displayName, p.producedItem);
@@ -1963,6 +2189,21 @@ function renderMapTab(container) {
     });
     rect.addEventListener('mouseleave', hideHoverLabel);
   });
+  const areaById = new Map(productionByArea.map(a => [String(a.id), a]));
+  for (let i = 0; i < areaMarkersGrp.children.length; i++) {
+    const circle = areaMarkersGrp.children[i];
+    const area = areaById.get(circle.getAttribute('data-area-id'));
+    if (!area) continue;
+    circle.addEventListener('mouseenter', (e) => {
+      hoverLabelName.textContent = area.label;
+      hoverLabelCat.textContent = area.items.length + ' items \u00B7 ' + area.totalPerMinute.toFixed(1) + '/min total';
+      hoverLabelProduces.style.display = 'none';
+      hoverLabel.classList.add('visible');
+      positionHoverLabel(e.clientX, e.clientY);
+    });
+    circle.addEventListener('mousemove', (e) => positionHoverLabel(e.clientX, e.clientY));
+    circle.addEventListener('mouseleave', hideHoverLabel);
+  }
   mapDiv.addEventListener('mousemove', (e) => {
     if (hoverLabel.classList.contains('visible')) positionHoverLabel(e.clientX, e.clientY);
   });
@@ -2016,6 +2257,68 @@ function renderMapTab(container) {
     }
   }, { passive: false });
 
+  if (mapViewMode === 'production' && productionByArea.length > 0) {
+    const prodPanel = h('div', { className: 'map-legend map-production-by-area' });
+    const prodHeader = document.createElement('div');
+    prodHeader.className = 'map-legend-header';
+    const prodTitle = document.createElement('h3');
+    prodTitle.textContent = 'Production by area';
+    prodHeader.appendChild(prodTitle);
+    prodPanel.appendChild(prodHeader);
+    productionByArea.forEach(area => {
+      const areaSection = document.createElement('div');
+      areaSection.className = 'map-production-area-section' + (mapAreaVisibility[area.id] === false ? ' area-disabled' : '') + (mapHighlightedAreaId === area.id ? ' area-highlighted' : '');
+      areaSection.setAttribute('data-area-id', String(area.id));
+      const areaRow = document.createElement('label');
+      areaRow.className = 'map-production-area-toggle';
+      const areaCb = document.createElement('input');
+      areaCb.type = 'checkbox';
+      areaCb.checked = mapAreaVisibility[area.id] !== false;
+      areaCb.addEventListener('change', () => {
+        mapAreaVisibility[area.id] = areaCb.checked;
+        renderTabContent();
+      });
+      const areaTitle = document.createElement('span');
+      areaTitle.className = 'map-production-area-title';
+      areaTitle.textContent = area.label;
+      areaRow.appendChild(areaCb);
+      areaRow.appendChild(areaTitle);
+      areaSection.appendChild(areaRow);
+      const areaBody = document.createElement('div');
+      areaBody.className = 'map-production-area-body';
+      const areaTotal = document.createElement('div');
+      areaTotal.className = 'map-production-area-total';
+      areaTotal.textContent = area.totalPerMinute.toFixed(1) + ' items/min total';
+      areaBody.appendChild(areaTotal);
+      if (area.items.length > 0) {
+        const table = document.createElement('table');
+        table.className = 'map-production-area-table';
+        const thead = document.createElement('thead');
+        thead.innerHTML = '<tr><th class="left">Item</th><th class="right">/min</th></tr>';
+        table.appendChild(thead);
+        const tbody = document.createElement('tbody');
+        tbody.className = 'divide';
+        area.items.forEach(({ name, perMinute }) => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td class="left">${itemIconHTML(name)} ${esc(name)}</td><td class="right">${perMinute.toFixed(2)}</td>`;
+          tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        areaBody.appendChild(table);
+      }
+      areaSection.appendChild(areaBody);
+      prodPanel.appendChild(areaSection);
+    });
+    layout.appendChild(prodPanel);
+    if (mapHighlightedAreaId != null) {
+      const highlightedEl = prodPanel.querySelector('[data-area-id="' + mapHighlightedAreaId + '"]');
+      if (highlightedEl) {
+        requestAnimationFrame(() => {
+          highlightedEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        });
+      }
+    }
+  } else {
   const legend = h('div', { className: 'map-legend' });
   const legendHeader = document.createElement('div');
   legendHeader.className = 'map-legend-header';
@@ -2043,17 +2346,9 @@ function renderMapTab(container) {
     droneChevron.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 10l5 5 5-5"/></svg>';
     droneChevron.setAttribute('aria-label', 'Collapse section');
     droneChevron.addEventListener('click', (e) => { e.stopPropagation(); droneCatDiv.classList.toggle('collapsed'); });
-    const droneCatTitle = document.createElement('label');
-    droneCatTitle.className = 'map-legend-cat-title map-legend-cat-toggle';
-    const transportCb = document.createElement('input');
-    transportCb.type = 'checkbox';
-    transportCb.checked = mapTransportLinesVisible;
-    transportCb.addEventListener('change', () => {
-      mapTransportLinesVisible = transportCb.checked;
-      setDroneLinesVisibility();
-    });
-    droneCatTitle.appendChild(transportCb);
-    droneCatTitle.appendChild(document.createTextNode(' Package transport (' + transportConnections.length + ' connections)'));
+    const droneCatTitle = document.createElement('span');
+    droneCatTitle.className = 'map-legend-cat-title';
+    droneCatTitle.textContent = 'Package transport (' + transportConnections.length + ' connections)';
     droneCatHead.appendChild(droneChevron);
     droneCatHead.appendChild(droneCatTitle);
     droneCatDiv.appendChild(droneCatHead);
@@ -2219,7 +2514,7 @@ function renderMapTab(container) {
       list.forEach(p => { mapBuildingVisibility[p.name] = on; });
       catDiv.querySelectorAll('.map-legend-item-toggle input[type="checkbox"]').forEach(cb => { cb.checked = on; });
       catCheckbox.indeterminate = false;
-      setRectVisibility(g, mapBuildingVisibility);
+      setRectVisibility(buildingRectsGrp, mapBuildingVisibility);
     });
     const catTitleText = document.createElement('span');
     catTitleText.textContent = cat;
@@ -2236,7 +2531,7 @@ function renderMapTab(container) {
       checkbox.checked = mapBuildingVisibility[name] !== false;
       checkbox.addEventListener('change', () => {
         mapBuildingVisibility[name] = checkbox.checked;
-        setRectVisibility(g, mapBuildingVisibility);
+        setRectVisibility(buildingRectsGrp, mapBuildingVisibility);
         updateCategoryCheckbox(catCheckbox, catDiv);
       });
       const dot = document.createElement('span');
@@ -2258,14 +2553,15 @@ function renderMapTab(container) {
   allBtn.addEventListener('click', () => {
     positions.forEach(p => { mapBuildingVisibility[p.name] = true; });
     legend.querySelectorAll('.map-legend-item-toggle input[type="checkbox"]').forEach(cb => { cb.checked = true; });
-    setRectVisibility(g, mapBuildingVisibility);
+    setRectVisibility(buildingRectsGrp, mapBuildingVisibility);
   });
   noneBtn.addEventListener('click', () => {
     positions.forEach(p => { mapBuildingVisibility[p.name] = false; });
     legend.querySelectorAll('.map-legend-item-toggle input[type="checkbox"]').forEach(cb => { cb.checked = false; });
-    setRectVisibility(g, mapBuildingVisibility);
+    setRectVisibility(buildingRectsGrp, mapBuildingVisibility);
   });
   layout.appendChild(legend);
+  }
   container.appendChild(layout);
 }
 
