@@ -270,6 +270,25 @@
     /* ===== Card / Panel ===== */
     .panel { background: var(--dark-800); border-radius: 0.5rem; overflow: hidden; }
 
+    .btn {
+      padding: 0.5rem 1rem; border-radius: 0.375rem; font-size: 0.875rem; font-weight: 500;
+      border: 1px solid var(--dark-600); background: var(--dark-700); color: var(--gray-200);
+      cursor: pointer; transition: background 0.15s, border-color 0.15s;
+    }
+    .btn:hover { background: var(--dark-600); border-color: var(--gray-500); }
+    .btn-primary { background: var(--accent-blue); border-color: var(--accent-blue); color: #fff; }
+    .btn-primary:hover { background: #4f6ae8; border-color: #4f6ae8; }
+
+    .json-editor-panel { padding: 0; min-height: 24rem; }
+    .json-editor-textarea {
+      width: 100%; min-height: 24rem; padding: 1rem; box-sizing: border-box;
+      font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace; font-size: 0.8125rem;
+      line-height: 1.4; color: var(--gray-200); background: var(--dark-900);
+      border: none; resize: vertical; outline: none;
+    }
+    .json-editor-textarea::placeholder { color: var(--gray-600); }
+    .json-editor-loading { padding: 2rem; text-align: center; color: var(--gray-500); }
+
     /* ===== Category (Buildings) ===== */
     .space-y > * + * { margin-top: 0.75rem; }
 
@@ -844,6 +863,109 @@ function hashColor(name) {
 let analysisData = null;
 let activeTab = 'buildings';
 let activeSaveName = null;
+let jsonEditorContent = null; // current textarea content when editable (preserved when switching tabs)
+
+const IDB_NAME = 'StarRuptureSaveMap';
+const IDB_STORE = 'saveData';
+const MAX_EDITABLE_JSON_SIZE = 1.5 * 1024 * 1024; // 1.5 MB — larger JSON is not shown in textarea to avoid timeout
+
+function openIdb() {
+  return new Promise((resolve, reject) => {
+    const r = indexedDB.open(IDB_NAME, 1);
+    r.onerror = () => reject(r.error);
+    r.onsuccess = () => resolve(r.result);
+    r.onupgradeneeded = (e) => { e.target.result.createObjectStore(IDB_STORE); };
+  });
+}
+
+function saveRawJsonToIdb(jsonString) {
+  return openIdb().then(db => {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      const store = tx.objectStore(IDB_STORE);
+      store.put(jsonString, 'rawJson');
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => reject(tx.error);
+    });
+  });
+}
+
+function getRawJsonFromIdb() {
+  return openIdb().then(db => {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const req = tx.objectStore(IDB_STORE).get('rawJson');
+      req.onsuccess = () => { db.close(); resolve(req.result != null ? req.result : null); };
+      req.onerror = () => reject(req.error);
+    });
+  });
+}
+
+const MAX_JSON_SEARCH_RESULTS = 500;
+
+function pathSegmentToKey(seg) {
+  const s = (seg.length >= 2 && seg.startsWith('"') && seg.endsWith('"')) ? seg.slice(1, -1) : seg;
+  return /^\d+$/.test(s) ? parseInt(s, 10) : s;
+}
+
+function getByPath(obj, pathStr) {
+  if (!pathStr) return obj;
+  const parts = pathStr.split('.').filter(Boolean);
+  let cur = obj;
+  for (const p of parts) {
+    if (cur == null) return undefined;
+    cur = cur[pathSegmentToKey(p)];
+  }
+  return cur;
+}
+
+function setByPath(obj, pathStr, value) {
+  const parts = pathStr.split('.').filter(Boolean);
+  if (parts.length === 0) return;
+  let cur = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const key = pathSegmentToKey(parts[i]);
+    if (cur[key] == null) return;
+    cur = cur[key];
+  }
+  cur[pathSegmentToKey(parts[parts.length - 1])] = value;
+}
+
+function searchJson(obj, query, maxResults) {
+  const q = (query || '').trim().toLowerCase();
+  if (!q) return [];
+  const results = [];
+  function walk(o, path) {
+    if (results.length >= maxResults) return;
+    if (o === null || o === undefined) return;
+    if (typeof o === 'string' || typeof o === 'number' || typeof o === 'boolean') {
+      if (String(o).toLowerCase().includes(q)) results.push({ path, value: o, type: typeof o });
+      return;
+    }
+    if (Array.isArray(o)) {
+      o.forEach((v, i) => walk(v, path ? path + '.' + i : String(i)));
+      return;
+    }
+    for (const [k, v] of Object.entries(o)) {
+      const seg = /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(k) ? k : ('"' + k + '"');
+      const nextPath = path ? path + '.' + seg : seg;
+      const keyMatches = k.toLowerCase().includes(q);
+      if (v === null || v === undefined) {
+        if (keyMatches && results.length < maxResults) results.push({ path: nextPath, value: v, type: 'object' });
+      } else if (typeof v === 'object' && !Array.isArray(v)) {
+        walk(v, nextPath);
+      } else if (Array.isArray(v)) {
+        walk(v, nextPath);
+      } else {
+        if ((keyMatches || String(v).toLowerCase().includes(q)) && results.length < maxResults) {
+          results.push({ path: nextPath, value: v, type: typeof v });
+        }
+      }
+    }
+  }
+  walk(obj, '');
+  return results;
+}
 
 // Per-tab state
 let buildingsSearch = '';
@@ -1048,6 +1170,47 @@ async function decompressData(compressedBytes) {
   }
 
   throw new Error('Your browser does not support DecompressionStream. Please use a modern browser (Chrome 80+, Edge 80+, Firefox 113+, Safari 16.4+).');
+}
+
+/** Compress JSON string to zlib (deflate) bytes for .sav format. */
+async function compressToSavPayload(jsonString) {
+  if (typeof CompressionStream === 'undefined') {
+    throw new Error('Your browser does not support CompressionStream. Use a modern browser to save .sav files.');
+  }
+  const bytes = new TextEncoder().encode(jsonString);
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    }
+  });
+  const compressedStream = stream.pipeThrough(new CompressionStream('deflate'));
+  const reader = compressedStream.getReader();
+  const chunks = [];
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+  }
+  const totalLen = chunks.reduce((s, c) => s + c.length, 0);
+  const result = new Uint8Array(totalLen);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return result;
+}
+
+/** Build full .sav file: 4-byte little-endian uncompressed size + zlib payload. */
+async function buildSavFile(jsonString) {
+  const payload = await compressToSavPayload(jsonString);
+  const uncompressedSize = new TextEncoder().encode(jsonString).length;
+  const out = new Uint8Array(4 + payload.length);
+  const view = new DataView(out.buffer);
+  view.setUint32(0, uncompressedSize, true); // little-endian
+  out.set(payload, 4);
+  return out;
 }
 
 async function parseSaveFile(file) {
@@ -1729,6 +1892,7 @@ function renderTabs() {
   if (droneCount > 0) {
     tabs.push({ id: 'drones', label: 'Package transport', count: droneCount });
   }
+  tabs.push({ id: 'json-editor', label: 'JSON Editor', count: null });
 
   for (const tab of tabs) {
     const btn = h('button', {
@@ -1736,7 +1900,7 @@ function renderTabs() {
       onclick: () => switchTab(tab.id)
     },
       tab.label,
-      h('span', { className: 'tab-badge' }, tab.count.toLocaleString())
+      tab.count != null ? h('span', { className: 'tab-badge' }, String(tab.count).toLocaleString()) : null
     );
     nav.appendChild(btn);
   }
@@ -1759,6 +1923,7 @@ function renderTabContent() {
   else if (activeTab === 'storage') renderStorageTab(container);
   else if (activeTab === 'map') renderMapTab(container);
   else if (activeTab === 'drones') renderDronesTab(container);
+  else if (activeTab === 'json-editor') renderJsonEditorTab(container);
 }
 
 // ===== Buildings Tab =====
@@ -2027,6 +2192,246 @@ function renderShortfallsTab(container) {
   table.appendChild(tbody);
   panel.appendChild(table);
   container.appendChild(panel);
+}
+
+// ===== JSON Editor Tab =====
+function renderJsonEditorTab(container) {
+  const msgEl = h('div', { className: 'json-editor-msg', style: 'display:none; margin-bottom:0.75rem; padding:0.5rem 0.75rem; border-radius:0.375rem; font-size:0.875rem' });
+  const toolbar = h('div', { className: 'toolbar' },
+    h('button', { className: 'btn btn-primary', id: 'jsonEditorApplyBtn', style: 'display:none' }, 'Apply'),
+    h('span', { className: 'json-editor-toolbar-hint', style: 'color:var(--gray-500);font-size:0.875rem;margin-left:0.5rem' }, ''),
+    h('div', { style: 'flex:1' }),
+    h('button', { className: 'btn', id: 'jsonEditorSaveBtn', style: 'display:none' }, 'Save as .sav')
+  );
+  container.appendChild(msgEl);
+  container.appendChild(toolbar);
+
+  const panel = h('div', { className: 'panel json-editor-panel' });
+  panel.innerHTML = '<div class="json-editor-loading">Loading…</div>';
+  container.appendChild(panel);
+
+  let getContent = null;
+  let textareaRef = null;
+
+  function showMsg(text, isError) {
+    msgEl.textContent = text;
+    msgEl.style.display = 'block';
+    msgEl.style.background = isError ? 'rgba(239, 68, 68, 0.15)' : 'rgba(34, 197, 94, 0.15)';
+    msgEl.style.color = isError ? '#fca5a5' : '#86efac';
+  }
+
+  async function doApply() {
+    let raw = getContent ? getContent() : null;
+    if (raw && typeof raw.then === 'function') raw = await raw;
+    const str = (typeof raw === 'string' ? raw : '').trim();
+    if (!str) { showMsg('JSON is empty.', true); return; }
+    try { JSON.parse(str); } catch (e) { showMsg('Invalid JSON: ' + e.message, true); return; }
+    try {
+      const result = analyze(str);
+      showAnalysis(result, activeSaveName || 'save.json');
+      if (textareaRef) { jsonEditorContent = textareaRef.value; saveRawJsonToIdb(str).catch(() => {}); }
+      showMsg('Applied. Analysis updated.', false);
+    } catch (e) { showMsg('Apply failed: ' + e.message, true); }
+  }
+
+  async function doSave() {
+    let raw = getContent ? getContent() : null;
+    if (raw && typeof raw.then === 'function') raw = await raw;
+    const str = (typeof raw === 'string' ? raw : '').trim();
+    if (!str) { showMsg('Nothing to save.', true); return; }
+    try { JSON.parse(str); } catch (e) { showMsg('Invalid JSON: ' + e.message, true); return; }
+    try {
+      const savBytes = await buildSavFile(str);
+      const baseName = (activeSaveName || 'save').replace(/\.(sav|json)$/i, '');
+      const downloadName = baseName + '.sav';
+      const blob = new Blob([savBytes], { type: 'application/octet-stream' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = downloadName;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      showMsg('Saved as ' + downloadName, false);
+    } catch (e) { showMsg('Save failed: ' + e.message, true); }
+  }
+
+  getRawJsonFromIdb().then(data => {
+    panel.innerHTML = '';
+    const applyBtn = document.getElementById('jsonEditorApplyBtn');
+    const saveBtn = document.getElementById('jsonEditorSaveBtn');
+    const hint = container.querySelector('.json-editor-toolbar-hint');
+
+    if (data == null || data === '') {
+      panel.appendChild(h('div', { className: 'json-editor-empty', style: 'padding:2rem;color:var(--gray-500);text-align:center' },
+        'Load a .sav file first. The JSON is saved when you load a save file.'
+      ));
+      if (saveBtn) saveBtn.style.display = 'none';
+      if (applyBtn) applyBtn.style.display = 'none';
+      if (hint) hint.textContent = '';
+      return;
+    }
+
+    const size = typeof data === 'string' ? new TextEncoder().encode(data).length : 0;
+    const sizeMb = (size / (1024 * 1024)).toFixed(1);
+    if (saveBtn) { saveBtn.style.display = 'inline-block'; saveBtn.onclick = doSave; }
+
+    if (size > MAX_EDITABLE_JSON_SIZE) {
+      const searchEdits = new Map();
+      function doDownloadJson() {
+        getRawJsonFromIdb().then(raw => {
+          if (raw == null) return;
+          const name = (activeSaveName || 'save').replace(/\.(sav|json)$/i, '') + '.json';
+          const blob = new Blob([raw], { type: 'application/json' });
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = name;
+          a.click();
+          URL.revokeObjectURL(a.href);
+          showMsg('Downloaded ' + name, false);
+        }).catch(e => showMsg('Download failed: ' + (e && e.message), true));
+      }
+      const searchWrap = h('div', { className: 'json-editor-too-large', style: 'padding:1.5rem;color:var(--gray-400);font-size:0.875rem' },
+        h('p', { style: 'margin:0 0 1rem' }, 'This save is large (' + sizeMb + ' MB). Search for keys or values below, edit the results, then save your changes back to the file.'),
+        h('div', { style: 'display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;margin-bottom:1rem' },
+          h('input', {
+            type: 'text',
+            id: 'jsonSearchInput',
+            placeholder: 'Search keys or values…',
+            className: 'search-input',
+            style: 'flex:1;min-width:12rem;padding:0.5rem 0.75rem;border-radius:0.375rem;border:1px solid var(--dark-600);background:var(--dark-800);color:var(--gray-200);font-size:0.875rem'
+          }),
+          h('button', { className: 'btn btn-primary', id: 'jsonSearchBtn' }, 'Search'),
+          h('button', { className: 'btn', onclick: doApply }, 'Re-analyze'),
+          h('button', { className: 'btn', onclick: doSave }, 'Save as .sav'),
+          h('button', { className: 'btn', onclick: doDownloadJson }, 'Download .json')
+        ),
+        h('div', { id: 'jsonSearchResults', style: 'margin-top:1rem' }),
+        h('div', { id: 'jsonSearchSaveWrap', style: 'margin-top:1rem' })
+      );
+      panel.appendChild(searchWrap);
+
+      const searchInput = document.getElementById('jsonSearchInput');
+      const searchBtn = document.getElementById('jsonSearchBtn');
+      const resultsDiv = document.getElementById('jsonSearchResults');
+
+      function renderResults(rows) {
+        if (!rows.length) {
+          resultsDiv.innerHTML = '<p style="color:var(--gray-500);margin:0">No matches. Try a different search.</p>';
+          return;
+        }
+        const table = document.createElement('table');
+        table.style.width = '100%';
+        table.style.fontSize = '0.875rem';
+        table.style.tableLayout = 'fixed';
+        table.innerHTML = '<thead><tr><th class="left" style="width:38%;padding:0.5rem 0.75rem;color:var(--gray-500)">Path</th><th class="left" style="width:62%;padding:0.5rem 0.75rem;color:var(--gray-500)">Value</th></tr></thead><tbody></tbody>';
+        const tbody = table.querySelector('tbody');
+        rows.forEach(r => {
+          const tr = document.createElement('tr');
+          tr.style.borderTop = '1px solid var(--dark-600)';
+          const pathCell = document.createElement('td');
+          pathCell.className = 'left';
+          pathCell.style.padding = '0.5rem 0.75rem;vertical-align:top';
+          const pathWrap = document.createElement('div');
+          pathWrap.style.cssText = 'color:var(--gray-300);font-family:monospace;word-break:break-word;overflow-wrap:anywhere;white-space:normal;max-width:100%';
+          pathWrap.textContent = r.path;
+          pathCell.appendChild(pathWrap);
+          const valueCell = document.createElement('td');
+          valueCell.className = 'left';
+          valueCell.style.padding = '0.5rem 0.75rem;vertical-align:top;min-width:0';
+          const currentVal = searchEdits.has(r.path) ? searchEdits.get(r.path) : r.value;
+          const isNullish = currentVal === null || currentVal === undefined;
+          if (r.type === 'object' && isNullish) {
+            valueCell.textContent = 'null';
+          } else {
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = currentVal === null || currentVal === undefined ? '' : String(currentVal);
+            input.style.cssText = 'display:block;width:100%;min-width:0;box-sizing:border-box;padding:0.35rem 0.5rem;border-radius:0.25rem;border:1px solid var(--dark-600);background:var(--dark-800);color:var(--gray-200)';
+            input.dataset.path = r.path;
+            input.dataset.type = r.type;
+            input.addEventListener('change', () => {
+              let val = input.value;
+              if (r.type === 'number') val = Number(val);
+              else if (r.type === 'boolean') val = val === 'true' || val === '1';
+              searchEdits.set(r.path, val);
+            });
+            valueCell.appendChild(input);
+          }
+          tr.appendChild(pathCell);
+          tr.appendChild(valueCell);
+          tbody.appendChild(tr);
+        });
+        resultsDiv.innerHTML = '';
+        resultsDiv.appendChild(table);
+        if (rows.length >= MAX_JSON_SEARCH_RESULTS) {
+          resultsDiv.appendChild(h('p', { style: 'margin:0.5rem 0 0;color:var(--gray-500);font-size:0.8125rem' }, 'Showing first ' + MAX_JSON_SEARCH_RESULTS + ' results. Refine your search for more.'));
+        }
+      }
+
+      searchBtn.onclick = () => {
+        const q = (searchInput && searchInput.value || '').trim();
+        if (!q) { showMsg('Enter a search term.', true); return; }
+        resultsDiv.innerHTML = '<p style="color:var(--gray-500);margin:0">Searching…</p>';
+        getRawJsonFromIdb().then(raw => {
+          let obj;
+          try { obj = JSON.parse(raw); } catch (e) { showMsg('Invalid JSON in file.', true); resultsDiv.innerHTML = ''; return; }
+          const rows = searchJson(obj, q, MAX_JSON_SEARCH_RESULTS);
+          renderResults(rows);
+          showMsg('Found ' + rows.length + ' match(es). Edit values and click Save changes.', false);
+        }).catch(e => { showMsg('Search failed: ' + (e && e.message), true); resultsDiv.innerHTML = ''; });
+      };
+      if (searchInput) searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') searchBtn.click(); });
+
+      function doSaveSearchEdits() {
+        const count = searchEdits.size;
+        if (count === 0) { showMsg('No edits to save. Search and edit some values first.', true); return; }
+        getRawJsonFromIdb().then(raw => {
+          let obj;
+          try { obj = JSON.parse(raw); } catch (e) { showMsg('Invalid JSON in file.', true); return; }
+          for (const [path, val] of searchEdits) {
+            try { setByPath(obj, path, val); } catch (_) {}
+          }
+          const newRaw = JSON.stringify(obj);
+          saveRawJsonToIdb(newRaw).then(() => {
+            searchEdits.clear();
+            showMsg('Saved ' + count + ' change(s) to the file. Use Save as .sav to export in game format.', false);
+          }).catch(e => showMsg('Save failed: ' + (e && e.message), true));
+        }).catch(e => showMsg('Save failed: ' + (e && e.message), true));
+      }
+      const saveChangesBtn = h('button', { className: 'btn btn-primary' }, 'Save changes to file');
+      saveChangesBtn.onclick = doSaveSearchEdits;
+      document.getElementById('jsonSearchSaveWrap').appendChild(saveChangesBtn);
+
+      getContent = () => getRawJsonFromIdb();
+      if (applyBtn) applyBtn.style.display = 'none';
+      if (hint) hint.textContent = 'Search and edit values, then save.';
+      return;
+    }
+
+    let contentToShow = typeof data === 'string' ? data : '';
+    if (jsonEditorContent !== null) contentToShow = jsonEditorContent;
+    getContent = () => (textareaRef && textareaRef.value) || contentToShow;
+    const panelInner = h('div', { className: 'json-editor-panel' });
+    textareaRef = document.createElement('textarea');
+    textareaRef.className = 'json-editor-textarea';
+    textareaRef.value = contentToShow;
+    textareaRef.spellcheck = false;
+    textareaRef.placeholder = 'Edit the JSON. Use Apply to re-analyze, Save as .sav to download in game format.';
+    textareaRef.addEventListener('input', () => { jsonEditorContent = textareaRef.value; msgEl.style.display = 'none'; });
+    panelInner.appendChild(textareaRef);
+    panel.appendChild(panelInner);
+
+    if (applyBtn) { applyBtn.style.display = 'inline-block'; applyBtn.onclick = doApply; }
+    if (hint) hint.textContent = 'Re-analyze with the JSON below.';
+  }).catch(err => {
+    panel.innerHTML = '';
+    panel.appendChild(h('div', { className: 'json-editor-empty', style: 'padding:2rem;color:var(--gray-500);text-align:center' },
+      'Could not load saved JSON: ' + (err && err.message ? err.message : 'Unknown error')
+    ));
+    const saveBtn = document.getElementById('jsonEditorSaveBtn');
+    const applyBtn = document.getElementById('jsonEditorApplyBtn');
+    if (saveBtn) saveBtn.style.display = 'none';
+    if (applyBtn) applyBtn.style.display = 'none';
+  });
 }
 
 // ===== Storage Tab =====
@@ -2982,6 +3387,7 @@ function esc(str) {
 function goBack() {
   analysisData = null;
   activeSaveName = null;
+  jsonEditorContent = null;
   activeTab = 'buildings';
   buildingsSearch = '';
   buildingsCollapsed = new Set();
@@ -3030,7 +3436,9 @@ async function processFile(file) {
 
   try {
     const jsonContent = await parseSaveFile(file);
+    jsonEditorContent = null;
     const result = analyze(jsonContent);
+    saveRawJsonToIdb(jsonContent).catch(() => {});
     showAnalysis(result, file.name);
   } catch (err) {
     console.error('Failed to analyze save file:', err);
