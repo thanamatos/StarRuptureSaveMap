@@ -1507,9 +1507,10 @@ function analyze(jsonContent) {
 
     if (!fragmentValues) continue;
 
-    if (buildingDef.IsStorage) {
-      parseStoredItems(fragmentValues, storage, data.ItemNames);
-    } else {
+    // Include inventory from all buildings (storage buildings + production building internal buffers)
+    parseStoredItems(fragmentValues, storage, data.ItemNames);
+
+    if (!buildingDef.IsStorage) {
       for (const fragmentValue of fragmentValues) {
         const f = String(fragmentValue);
         if (f.startsWith('/Script/Chimera.CrCraftingFragment')) {
