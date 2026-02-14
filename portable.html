@@ -308,7 +308,8 @@
     .map-layout {
       display: flex; gap: 1rem; flex-wrap: wrap;
       align-items: stretch;
-      min-height: min(70vh, 800px);
+      min-height: calc(100vh - 11rem);
+      height: calc(100vh - 11rem);
     }
     .map-wrapper {
       flex: 1; min-width: 300px; min-height: 0;
@@ -318,18 +319,18 @@
       border: 1px solid var(--dark-600);
     }
     .map-container {
-      flex: 1; width: 100%; min-height: 400px;
+      flex: 1; width: 100%; min-height: 0;
       cursor: grab; touch-action: none;
     }
     .map-container:active { cursor: grabbing; }
     .map-container svg {
-      display: block; width: 100%; height: 100%; min-height: 400px;
+      display: block; width: 100%; height: 100%; min-height: 300px;
     }
     .map-legend {
       width: 220px; flex-shrink: 0;
       background: var(--dark-800); border-radius: 0.5rem;
       padding: 0.75rem; border: 1px solid var(--dark-600);
-      max-height: min(70vh, 800px); overflow-y: auto;
+      max-height: calc(100vh - 11rem); overflow-y: auto;
     }
     .map-legend-header {
       display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem;
@@ -349,6 +350,25 @@
     .map-legend-cat {
       margin-bottom: 0.75rem;
     }
+    .map-legend-cat-collapsible .map-legend-cat-head {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+    .map-legend-cat-chevron {
+      flex-shrink: 0;
+      width: 1rem;
+      height: 1rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: var(--gray-500);
+      transition: transform 0.15s ease;
+    }
+    .map-legend-cat-chevron:hover { color: var(--gray-300); }
+    .map-legend-cat-collapsible.collapsed .map-legend-cat-chevron { transform: rotate(-90deg); }
+    .map-legend-cat-collapsible.collapsed .map-legend-cat-body { display: none; }
     .map-legend-cat-title {
       font-size: 0.75rem; font-weight: 600; color: var(--accent-blue);
       margin-bottom: 0.25rem;
@@ -446,7 +466,7 @@ const ITEMS_DATA = {
     { "InternalName": "/Game/Chimera/Buildings/AcidExtractor/DA_AcidExtractor.DA_AcidExtractor", "Name": "Sulfur Extractor", "Category": "Extraction" },
     { "InternalName": "/Game/Chimera/Buildings/GasExtractor/DA_GasExtractor.DA_GasExtractor", "Name": "Helium-3 Extractor", "Category": "Extraction" },
     { "InternalName": "/Game/Chimera/Buildings/Smelter/DA_Smelter.DA_Smelter", "Name": "Smelter", "Category": "Ore Processing" },
-    { "InternalName": "/Game/Chimera/Buildings/Furnace/DA_Furnace.DA_Furnace", "Name": "Furnace", "Category": "Ore Processing" },
+    { "InternalName": "/Game/Chimera/Buildings/Furnace/DA_Furnace.DA_Furnace", "Name": "Furnace", "Category": "Crafting" },
     { "InternalName": "/Game/Chimera/Buildings/Refinery/DA_Refinery.DA_Refinery", "Name": "Refinery", "Category": "Ore Processing" },
     { "InternalName": "/Game/Chimera/Buildings/Crafter/DA_Crafter.DA_Crafter", "Name": "Fabricator", "Category": "Crafting" },
     { "InternalName": "/Game/Chimera/Buildings/Assembler/DA_Assembler.DA_Assembler", "Name": "Assembler", "Category": "Crafting" },
@@ -706,12 +726,75 @@ let storageSearch = '';
 let storageSortField = 'name';
 let storageSortDir = 'asc';
 
+let dronesItemFilter = null;
+
 let mapScale = 1;
 let mapTranslateX = 0;
 let mapTranslateY = 0;
 let mapDragStart = null;
 const MAP_DEFAULT_VISIBLE_CATEGORY = 'Crafting';
 let mapBuildingVisibility = {};
+
+// StarRuptureMap-style world-to-SVG transform (from StarRuptureMap main.go)
+// Go uses full SVG 4352x5120; playable area is (380,567) to (3927,4038). We use content-only viewBox.
+const MAP_SRC_X1 = -358583.0, MAP_DST_X1 = 380.0, MAP_SRC_X2 = -98583.0, MAP_DST_X2 = 3927.0;
+const MAP_SRC_Y1 = -263782.0, MAP_DST_Y1 = 567.0, MAP_SRC_Y2 = -9439.0, MAP_DST_Y2 = 4038.0;
+const MAP_SCALE_X = (MAP_DST_X2 - MAP_DST_X1) / (MAP_SRC_X2 - MAP_SRC_X1);
+const MAP_SCALE_Y = (MAP_DST_Y2 - MAP_DST_Y1) / (MAP_SRC_Y2 - MAP_SRC_Y1);
+const MAP_OFFSET_X = MAP_DST_X1 - MAP_SRC_X1 * MAP_SCALE_X;
+const MAP_OFFSET_Y = MAP_DST_Y1 - MAP_SRC_Y1 * MAP_SCALE_Y;
+const MAP_CONTENT_WIDTH = MAP_DST_X2 - MAP_DST_X1;
+const MAP_CONTENT_HEIGHT = MAP_DST_Y2 - MAP_DST_Y1;
+const MAP_IMAGE_WIDTH = 4352;
+const MAP_IMAGE_HEIGHT = 5120;
+const BASE_MAP_URL = 'https://raw.githubusercontent.com/bithoarder/StarRuptureMap/main/base_map.webp';
+
+function worldToMapCoords(worldX, worldY) {
+  return {
+    x: (worldX - MAP_SRC_X1) * MAP_SCALE_X,
+    y: (worldY - MAP_SRC_Y1) * MAP_SCALE_Y
+  };
+}
+
+// Entity type colors/sizes from StarRuptureMap (building InternalName -> { color, size })
+const MAP_ENTITY_VISUAL = {
+  'Package Sender': { color: '#8080ff', size: 3 },
+  'Package Receiver': { color: '#8080ff', size: 3 },
+  'Resource Redistributor': { color: '#8080ff', size: 2 },
+  'Storage': { color: '#8080ff', size: 3 },
+  'Solar Power Generator T1': { color: '#80ff80', size: 2 },
+  'Solar Power Generator T2': { color: '#80ff80', size: 3 },
+  'Wind Power Generator T1': { color: '#80ff80', size: 4 },
+  'Base Core': { color: '#a0a0a0', size: 4 },
+  'Passive Cooler': { color: '#ff8080', size: 2 },
+  'Active Cooler': { color: '#ff8080', size: 4 },
+  'Ore Extractor': { color: '#ffffff', size: 5 },
+  'Helium-3 Extractor': { color: '#ffffff', size: 5 },
+  'Sulfur Extractor': { color: '#ffffff', size: 5 },
+  'Turret T1': { color: '#808080', size: 1 },
+  'Smelter': { color: '#ffffff', size: 3 },
+  'Fabricator': { color: '#ffffff', size: 3 },
+  'Furnace': { color: '#ffffff', size: 3 },
+  'Habitat (Small)': { color: '#808080', size: 5 },
+  'Assembler': { color: '#ffffff', size: 3 },
+  'Teleporter': { color: '#ffff00', size: 5 },
+  'Refinery': { color: '#ffffff', size: 6 },
+  'Compounder': { color: '#ffffff', size: 6 },
+  'Mega Press': { color: '#ffffff', size: 4 },
+  'Drone Rail Support': { color: '#8080ff', size: 1 },
+  'Drone Junction': { color: '#8080ff', size: 1 },
+  'Drone Merger (3-to-1)': { color: '#8080ff', size: 1 },
+  'Drone Lane': { color: '#8080ff', size: 1 },
+  'Drone Merger (5-to-1)': { color: '#8080ff', size: 1 }
+};
+function mapColorForBuilding(name) {
+  const v = MAP_ENTITY_VISUAL[name];
+  return v ? v.color : hashColor(name);
+}
+function mapSizeForBuilding(name) {
+  const v = MAP_ENTITY_VISUAL[name];
+  return (v ? v.size : 4) * 2.5;
+}
 
 // ===== DOM Helpers =====
 const $ = (sel) => document.querySelector(sel);
@@ -998,7 +1081,9 @@ function analyze(jsonContent) {
     let spawnData;
     try { spawnData = getJsonItems(entityValue, 'spawnData'); } catch { continue; }
 
-    const entityConfigDataPath = String(spawnData['entityConfigDataPath'] || '');
+    const entityConfigDataPath = String(
+      spawnData['entityConfigDataPath'] || spawnData['EntityConfigDataPath'] || ''
+    );
     const buildingDef = buildingsByInternal.get(entityConfigDataPath);
     if (!buildingDef) continue;
 
@@ -1036,6 +1121,7 @@ function analyze(jsonContent) {
         }
       }
       buildingPositions.push({
+        entityId: entityIdKey,
         name: buildingDef.Name,
         category,
         x: pos.x, y: pos.y, z: pos.z,
@@ -1118,23 +1204,98 @@ function analyze(jsonContent) {
   let totalStoredItems = 0;
   for (const item of storageArr) totalStoredItems += item.count;
 
+  // Package transport connections (sender -> receiver), from StarRuptureMap; "drones" = these routes
+  const transportConnections = [];
+  try {
+    const senderConnections = getJsonItems(root, 'itemData/CrPackageTransportReplicator/senderConnections');
+    const entityIdToPos = new Map();
+    const entityIdToName = new Map();
+    for (const p of buildingPositions) {
+      if (p.entityId != null) {
+        entityIdToPos.set(String(p.entityId), { x: p.x, y: p.y });
+        const label = (p.displayName && p.displayName.trim()) ? p.displayName.trim() : p.name;
+        entityIdToName.set(String(p.entityId), label);
+      }
+    }
+    for (const [senderId, cfg] of Object.entries(senderConnections)) {
+      if (!cfg || typeof cfg !== 'object') continue;
+      const rec = cfg.receiver || cfg.Receiver;
+      const recId = rec && (rec.iD != null ? rec.iD : rec.ID);
+      if (recId == null) continue;
+      const receiverId = '(ID=' + recId + ')';
+      if (!entityIdToPos.has(String(senderId)) || !entityIdToPos.has(receiverId)) continue;
+      const rawItem = cfg.item || cfg.Item || '';
+      const itemId = typeof rawItem === 'string' && rawItem ? extractItemIdentifier(rawItem) : null;
+      const itemDisplayName = (itemId && data.ItemNames[itemId]) ? data.ItemNames[itemId] : (itemId ? resolveItemName(itemId, data.ItemNames) : rawItem || '—');
+      const requestedAmount = cfg.requestedAmount ?? cfg.RequestedAmount ?? 0;
+      transportConnections.push({
+        senderId: String(senderId),
+        receiverId,
+        senderPos: entityIdToPos.get(String(senderId)),
+        receiverPos: entityIdToPos.get(receiverId),
+        senderName: entityIdToName.get(String(senderId)) || 'Sender',
+        receiverName: entityIdToName.get(receiverId) || 'Receiver',
+        item: rawItem,
+        itemDisplayName,
+        requestedAmount: Number(requestedAmount) || 0
+      });
+    }
+  } catch (_) {}
+
+  // Drones in transit: agents currently carrying an item (from logistics runtime data)
+  const droneCarriers = [];
+  try {
+    const entityIdToPosForDrones = new Map();
+    for (const p of buildingPositions) {
+      if (p.entityId != null) entityIdToPosForDrones.set(String(p.entityId), { x: p.x, y: p.y });
+    }
+    let requestData;
+    try {
+      requestData = getJsonItems(root, 'itemData/Mass/logisticsRequestSubsystemState/requestData');
+    } catch (_) {
+      requestData = getJsonItems(root, 'itemData/Mass/LogisticsRequestSubsystemState/requestData');
+    }
+    for (const req of Object.values(requestData)) {
+      if (!req || typeof req !== 'object') continue;
+      const runtimeData = req.runtimeData || req.RuntimeData;
+      if (!Array.isArray(runtimeData)) continue;
+      for (const rt of runtimeData) {
+        if (!rt || typeof rt !== 'object') continue;
+        const agentRef = rt.agentEntity || rt.AgentEntity;
+        const agentId = agentRef != null && (agentRef.iD != null || agentRef.ID != null)
+          ? '(ID=' + (agentRef.iD != null ? agentRef.iD : agentRef.ID) + ')'
+          : null;
+        if (!agentId || !entityIdToPosForDrones.has(agentId)) continue;
+        const actualItem = rt.actualItem || rt.ActualItem;
+        const itemDataBase = actualItem && (actualItem.itemDataBase || actualItem.ItemDataBase);
+        const itemId = typeof itemDataBase === 'string' && itemDataBase ? extractItemIdentifier(itemDataBase) : null;
+        const itemDisplayName = (itemId && data.ItemNames[itemId]) ? data.ItemNames[itemId] : (itemId ? resolveItemName(itemId, data.ItemNames) : (itemDataBase || '—'));
+        const pos = entityIdToPosForDrones.get(agentId);
+        droneCarriers.push({
+          entityId: agentId,
+          x: pos.x,
+          y: pos.y,
+          itemDisplayName: itemDisplayName || '—'
+        });
+      }
+    }
+  } catch (_) {}
+
   return {
     buildingCategories, production: productionArr, storage: storageArr,
-    buildingPositions,
+    buildingPositions, transportConnections, droneCarriers,
     totals: { buildings: totalBuildings, productionItems: productionArr.length, storedItems: totalStoredItems }
   };
 }
 
 // ===== UI Rendering =====
 
-function renderPickerView() {
+function renderPickerView(appendTo) {
   const main = $('#mainContent');
   const container = h('div', { className: 'picker-container' },
     h('svg', null), // placeholder, replaced below
     h('div', { className: 'picker-title' }, 'Star Rupture Save Analyzer'),
-    h('div', { className: 'picker-subtitle' },
-      'Open a .sav file from your Star Rupture save folder to analyze buildings, production rates, and storage.'
-    ),
+    h('div', { className: 'picker-subtitle' }, 'Open a .sav file from your Star Rupture save folder to analyze buildings, production rates, and storage.'),
     h('div', { className: 'file-input-wrapper' },
       h('button', { className: 'file-btn' },
         h('svg', null),
@@ -1153,7 +1314,12 @@ function renderPickerView() {
   const btnSvg = btn.querySelector('svg');
   btnSvg.outerHTML = `<svg style="width:1.25rem;height:1.25rem" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>`;
 
-  setHTML(main, container);
+  if (appendTo) {
+    appendTo.innerHTML = '';
+    appendTo.appendChild(container);
+  } else {
+    setHTML(main, container);
+  }
 }
 
 function renderAnalysisView() {
@@ -1187,6 +1353,14 @@ function renderAnalysisView() {
       h('div', { className: 'summary-sub' }, 'building locations')
     ));
   }
+  const droneCount = (data.transportConnections || []).length;
+  if (droneCount > 0) {
+    grid.appendChild(h('div', { className: 'summary-card', onclick: () => switchTab('drones') },
+      h('div', { className: 'summary-label' }, 'Package transport'),
+      h('div', { className: 'summary-value', style: 'color:#06b6d4' }, droneCount.toLocaleString()),
+      h('div', { className: 'summary-sub' }, 'sender → receiver')
+    ));
+  }
   main.appendChild(grid);
 
   // Tab content container
@@ -1211,6 +1385,10 @@ function renderTabs() {
   ];
   if (data.buildingPositions && data.buildingPositions.length > 0) {
     tabs.push({ id: 'map', label: 'Map', count: data.buildingPositions.length });
+  }
+  const droneCount = (data.transportConnections || []).length;
+  if (droneCount > 0) {
+    tabs.push({ id: 'drones', label: 'Package transport', count: droneCount });
   }
 
   for (const tab of tabs) {
@@ -1240,6 +1418,7 @@ function renderTabContent() {
   else if (activeTab === 'production') renderProductionTab(container);
   else if (activeTab === 'storage') renderStorageTab(container);
   else if (activeTab === 'map') renderMapTab(container);
+  else if (activeTab === 'drones') renderDronesTab(container);
 }
 
 // ===== Buildings Tab =====
@@ -1497,9 +1676,86 @@ function renderStorageTab(container) {
   container.appendChild(panel);
 }
 
-// ===== Map Tab =====
+// ===== Package transport Tab (sender → receiver connections, filter by item) =====
+function renderDronesTab(container) {
+  const connections = analysisData.transportConnections || [];
+  const itemNames = [...new Set(connections.map(c => c.itemDisplayName))].filter(Boolean).sort();
+
+  let filtered = connections;
+  if (dronesItemFilter != null && dronesItemFilter !== '') {
+    filtered = connections.filter(c => c.itemDisplayName === dronesItemFilter);
+  }
+
+  const toolbar = h('div', { className: 'toolbar' },
+    h('div', { className: 'toolbar-stats' },
+      h('span', { className: 'stat-value', style: 'color:#06b6d4' }, String(filtered.length)),
+      ' connections',
+      dronesItemFilter ? ` · carrying ${esc(dronesItemFilter)}` : ''
+    )
+  );
+  container.appendChild(toolbar);
+
+  const pills = h('div', { className: 'filter-pills' });
+  const allPill = h('button', {
+    className: `pill ${dronesItemFilter === null ? 'active' : ''}`,
+    onclick: () => { dronesItemFilter = null; renderTabContent(); }
+  }, 'All items');
+  pills.appendChild(allPill);
+  for (const name of itemNames) {
+    const pill = document.createElement('button');
+    pill.className = `pill ${dronesItemFilter === name ? 'active' : ''}`;
+    pill.innerHTML = `${itemIconHTML(name)}${esc(name)}`;
+    pill.addEventListener('click', () => {
+      dronesItemFilter = dronesItemFilter === name ? null : name;
+      renderTabContent();
+    });
+    pills.appendChild(pill);
+  }
+  container.appendChild(pills);
+
+  const panel = h('div', { className: 'panel' });
+  const table = document.createElement('table');
+  const thead = document.createElement('thead');
+  const headerRow = document.createElement('tr');
+  headerRow.innerHTML = `
+    <th class="left">Sender</th>
+    <th class="left">Receiver</th>
+    <th class="left">Item</th>
+    <th class="right">Requested</th>`;
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  tbody.className = 'divide';
+  for (const conn of filtered) {
+    const tr = document.createElement('tr');
+    const itemCell = `<span class="name-with-icon">${itemIconHTML(conn.itemDisplayName)}${esc(conn.itemDisplayName)}</span>`;
+    tr.innerHTML = `
+      <td class="left" style="color:var(--gray-200)">${esc(conn.senderName)}</td>
+      <td class="left" style="color:var(--gray-200)">${esc(conn.receiverName)}</td>
+      <td class="left" style="color:var(--gray-100)">${itemCell}</td>
+      <td class="right mono" style="color:var(--gray-300)">${conn.requestedAmount > 0 ? conn.requestedAmount.toLocaleString() : '—'}</td>`;
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  panel.appendChild(table);
+
+  if (filtered.length === 0) {
+    panel.appendChild(h('div', { className: 'empty-msg' },
+      dronesItemFilter ? `No connections carrying "${esc(dronesItemFilter)}".` : 'No package transport connections in this save.'
+    ));
+  }
+
+  container.appendChild(panel);
+}
+
+// ===== Map Tab (StarRuptureMap-style: fixed viewBox, base map, transport lines) =====
+let mapTransportLinesVisible = true;
+let mapDronesItemFilter = null;
+let mapDroneCarrierItemFilter = null;
 function renderMapTab(container) {
   const positions = analysisData.buildingPositions || [];
+  const transportConnections = analysisData.transportConnections || [];
   mapScale = 1;
   mapTranslateX = 0;
   mapTranslateY = 0;
@@ -1508,19 +1764,12 @@ function renderMapTab(container) {
     return;
   }
 
-  const xs = positions.map(p => p.x);
-  const ys = positions.map(p => p.y);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-  const rangeX = maxX - minX || 100;
-  const rangeY = maxY - minY || 100;
-  const pad = Math.max(rangeX, rangeY) * 0.05 || 50;
-  const vbMinX = minX - pad;
-  const vbMinY = minY - pad;
-  const vbW = rangeX + pad * 2;
-  const vbH = rangeY + pad * 2;
+  const vbMinX = 0;
+  const vbMinY = 0;
+  const vbW = MAP_CONTENT_WIDTH;
+  const vbH = MAP_CONTENT_HEIGHT;
+  const viewCenterX = vbW / 2;
+  const viewCenterY = vbH / 2;
 
   const layout = h('div', { className: 'map-layout' });
 
@@ -1547,6 +1796,81 @@ function renderMapTab(container) {
   g.id = 'mapPanZoom';
   g.setAttribute('transform', `translate(${mapTranslateX},${mapTranslateY}) scale(${mapScale})`);
 
+  const img = document.createElementNS(svgNs, 'image');
+  img.setAttribute('href', BASE_MAP_URL);
+  img.setAttribute('x', -MAP_DST_X1);
+  img.setAttribute('y', -MAP_DST_Y1);
+  img.setAttribute('width', MAP_IMAGE_WIDTH);
+  img.setAttribute('height', MAP_IMAGE_HEIGHT);
+  img.setAttribute('opacity', '0.85');
+  g.appendChild(img);
+
+  const linesGrp = document.createElementNS(svgNs, 'g');
+  linesGrp.id = 'mapTransportLines';
+  (analysisData.transportConnections || []).forEach(conn => {
+    const s = worldToMapCoords(conn.senderPos.x, conn.senderPos.y);
+    const r = worldToMapCoords(conn.receiverPos.x, conn.receiverPos.y);
+    const line = document.createElementNS(svgNs, 'line');
+    line.setAttribute('x1', s.x);
+    line.setAttribute('y1', s.y);
+    line.setAttribute('x2', r.x);
+    line.setAttribute('y2', r.y);
+    line.setAttribute('stroke', '#8080ff');
+    line.setAttribute('stroke-width', '2');
+    line.setAttribute('stroke-opacity', '0.7');
+    line.setAttribute('data-layer', 'transport');
+    line.setAttribute('data-item', conn.itemDisplayName || '');
+    linesGrp.appendChild(line);
+  });
+  function setDroneLinesVisibility() {
+    const grp = document.getElementById('mapTransportLines');
+    if (!grp) return;
+    grp.style.display = mapTransportLinesVisible ? '' : 'none';
+    if (mapTransportLinesVisible) {
+      for (let i = 0; i < grp.children.length; i++) {
+        const line = grp.children[i];
+        const item = line.getAttribute('data-item');
+        line.style.display = (mapDronesItemFilter == null || mapDronesItemFilter === '' || item === mapDronesItemFilter) ? '' : 'none';
+      }
+    }
+  }
+  setDroneLinesVisibility();
+  g.appendChild(linesGrp);
+
+  const droneCarriers = analysisData.droneCarriers || [];
+  const droneMarkersGrp = document.createElementNS(svgNs, 'g');
+  droneMarkersGrp.id = 'mapDroneCarrierMarkers';
+  droneCarriers.forEach(d => {
+    const m = worldToMapCoords(d.x, d.y);
+    const circle = document.createElementNS(svgNs, 'circle');
+    circle.setAttribute('cx', m.x);
+    circle.setAttribute('cy', m.y);
+    circle.setAttribute('r', 6);
+    circle.setAttribute('fill', '#06b6d4');
+    circle.setAttribute('stroke', '#0e7490');
+    circle.setAttribute('stroke-width', '1.5');
+    circle.setAttribute('data-item', d.itemDisplayName || '');
+    circle.setAttribute('opacity', '0.9');
+    droneMarkersGrp.appendChild(circle);
+  });
+  const MAP_CARRIER_SHOW_ALL = '\u200b**all**'; // sentinel for "show all" drone markers
+  function setDroneCarrierMarkersVisibility() {
+    const grp = document.getElementById('mapDroneCarrierMarkers');
+    if (!grp) return;
+    if (mapDroneCarrierItemFilter == null || mapDroneCarrierItemFilter === '') {
+      grp.style.display = 'none';
+      return;
+    }
+    grp.style.display = '';
+    const showAll = (mapDroneCarrierItemFilter === MAP_CARRIER_SHOW_ALL);
+    for (let i = 0; i < grp.children.length; i++) {
+      const el = grp.children[i];
+      el.style.display = (showAll || el.getAttribute('data-item') === mapDroneCarrierItemFilter) ? '' : 'none';
+    }
+  }
+  setDroneCarrierMarkersVisibility();
+  g.appendChild(droneMarkersGrp);
+
   const byName = {};
   positions.forEach(p => {
     byName[p.name] = (byName[p.name] || 0) + 1;
@@ -1558,24 +1882,23 @@ function renderMapTab(container) {
     }
   });
   const mapSpan = Math.min(vbW, vbH);
-  const baseSize = mapSpan * 0.0012;
-  const minSize = Math.max(1, baseSize * 0.3);
-  const maxSize = mapSpan * 0.012;
+  const minSize = 2;
+  const maxSize = mapSpan * 0.015;
   function setRectVisibility(grp, visibilityMap) {
     for (let i = 0; i < grp.children.length; i++) {
-      const rect = grp.children[i];
-      const name = rect.getAttribute('data-name');
-      rect.style.display = visibilityMap[name] !== false ? '' : 'none';
+      const el = grp.children[i];
+      const name = el.getAttribute('data-name');
+      if (name != null) el.style.display = visibilityMap[name] !== false ? '' : 'none';
     }
   }
   positions.forEach(p => {
+    const m = worldToMapCoords(p.x, p.y);
+    const size = Math.max(minSize, Math.min(maxSize, mapSizeForBuilding(p.name)));
     const rect = document.createElementNS(svgNs, 'rect');
-    const w = Math.max(minSize, Math.min(maxSize, baseSize * (p.scaleX ?? 1)));
-    const h = Math.max(minSize, Math.min(maxSize, baseSize * (p.scaleY ?? 1)));
-    rect.setAttribute('x', p.x - w / 2);
-    rect.setAttribute('y', p.y - h / 2);
-    rect.setAttribute('width', w);
-    rect.setAttribute('height', h);
+    rect.setAttribute('x', m.x - size / 2);
+    rect.setAttribute('y', m.y - size / 2);
+    rect.setAttribute('width', size);
+    rect.setAttribute('height', size);
     rect.setAttribute('fill', hashColor(p.name));
     rect.setAttribute('stroke', 'rgba(0,0,0,0.5)');
     rect.setAttribute('stroke-width', '0.5');
@@ -1596,13 +1919,12 @@ function renderMapTab(container) {
   const hoverLabelProduces = hoverLabel.querySelector('.map-hover-label-produces');
   const labelOffset = 12;
   function showHoverLabel(name, category, clientX, clientY, displayName, producedItem) {
-    if (displayName && displayName !== name) {
-      hoverLabelName.textContent = displayName;
-      hoverLabelCat.textContent = `${name} · ${category}`;
-    } else {
-      hoverLabelName.textContent = name;
-      hoverLabelCat.textContent = category;
-    }
+    // Line 1: always show building type (name)
+    hoverLabelName.textContent = name;
+    // Line 2: category; if user set a custom name, show it here too
+    hoverLabelCat.textContent = (displayName && displayName !== name)
+      ? `${category} · "${displayName}"`
+      : category;
     if (producedItem) {
       hoverLabelProduces.textContent = `Producing: ${producedItem}`;
       hoverLabelProduces.style.display = '';
@@ -1626,8 +1948,10 @@ function renderMapTab(container) {
   function hideHoverLabel() {
     hoverLabel.classList.remove('visible');
   }
+  const rectOffset = 3; // g has image, linesGrp, droneMarkersGrp, then rects
   positions.forEach((p, i) => {
-    const rect = g.children[i];
+    const rect = g.children[rectOffset + i];
+    if (!rect) return;
     rect.addEventListener('mouseenter', (e) => {
       showHoverLabel(p.name, p.category, e.clientX, e.clientY, p.displayName, p.producedItem);
     });
@@ -1645,9 +1969,6 @@ function renderMapTab(container) {
 
   let isDragging = false;
   let startX, startY, startTx, startTy;
-
-  const viewCenterX = vbMinX + vbW / 2;
-  const viewCenterY = vbMinY + vbH / 2;
 
   function pixelToViewBox(deltaPx, deltaPy) {
     const rect = mapDiv.getBoundingClientRect();
@@ -1709,6 +2030,164 @@ function renderMapTab(container) {
   legendHeader.appendChild(allBtn);
   legendHeader.appendChild(noneBtn);
   legend.appendChild(legendHeader);
+  if (transportConnections.length > 0) {
+    const droneCatDiv = document.createElement('div');
+    droneCatDiv.className = 'map-legend-cat map-legend-cat-collapsible collapsed';
+    const droneCatHead = document.createElement('div');
+    droneCatHead.className = 'map-legend-cat-head';
+    const droneChevron = document.createElement('span');
+    droneChevron.className = 'map-legend-cat-chevron';
+    droneChevron.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 10l5 5 5-5"/></svg>';
+    droneChevron.setAttribute('aria-label', 'Collapse section');
+    droneChevron.addEventListener('click', (e) => { e.stopPropagation(); droneCatDiv.classList.toggle('collapsed'); });
+    const droneCatTitle = document.createElement('label');
+    droneCatTitle.className = 'map-legend-cat-title map-legend-cat-toggle';
+    const transportCb = document.createElement('input');
+    transportCb.type = 'checkbox';
+    transportCb.checked = mapTransportLinesVisible;
+    transportCb.addEventListener('change', () => {
+      mapTransportLinesVisible = transportCb.checked;
+      setDroneLinesVisibility();
+    });
+    droneCatTitle.appendChild(transportCb);
+    droneCatTitle.appendChild(document.createTextNode(' Package transport (' + transportConnections.length + ' connections)'));
+    droneCatHead.appendChild(droneChevron);
+    droneCatHead.appendChild(droneCatTitle);
+    droneCatDiv.appendChild(droneCatHead);
+
+    const droneCatBody = document.createElement('div');
+    droneCatBody.className = 'map-legend-cat-body';
+    const droneFilterLabel = document.createElement('div');
+    droneFilterLabel.className = 'map-legend-cat-title';
+    droneFilterLabel.style.marginTop = '0.35rem';
+    droneFilterLabel.style.marginBottom = '0.25rem';
+    droneFilterLabel.textContent = 'Filter by item:';
+    droneCatBody.appendChild(droneFilterLabel);
+
+    const dronePillsWrap = document.createElement('div');
+    dronePillsWrap.className = 'filter-pills';
+    dronePillsWrap.style.marginBottom = '0.5rem';
+
+    const allDronePill = document.createElement('button');
+    allDronePill.className = 'pill map-legend-drones-pill' + (mapDronesItemFilter === null ? ' active' : '');
+    allDronePill.dataset.item = 'all';
+    allDronePill.textContent = 'All';
+    allDronePill.addEventListener('click', () => {
+      mapDronesItemFilter = null;
+      setDroneLinesVisibility();
+      droneCatDiv.querySelectorAll('.map-legend-drones-pill').forEach(p => {
+        p.classList.toggle('active', p.dataset.item === 'all');
+      });
+    });
+    dronePillsWrap.appendChild(allDronePill);
+
+    const mapDroneItems = [...new Set(transportConnections.map(c => c.itemDisplayName))].filter(Boolean).sort();
+    mapDroneItems.forEach(itemName => {
+      const pill = document.createElement('button');
+      pill.className = 'pill map-legend-drones-pill' + (mapDronesItemFilter === itemName ? ' active' : '');
+      pill.dataset.item = itemName;
+      pill.innerHTML = `${itemIconHTML(itemName)}${esc(itemName)}`;
+      pill.style.fontSize = '0.75rem';
+      pill.addEventListener('click', () => {
+        mapDronesItemFilter = mapDronesItemFilter === itemName ? null : itemName;
+        setDroneLinesVisibility();
+        droneCatDiv.querySelectorAll('.map-legend-drones-pill').forEach(p => {
+          p.classList.toggle('active', (p.dataset.item === 'all' && mapDronesItemFilter === null) || p.dataset.item === mapDronesItemFilter);
+        });
+      });
+      dronePillsWrap.appendChild(pill);
+    });
+    droneCatBody.appendChild(dronePillsWrap);
+    droneCatDiv.appendChild(droneCatBody);
+    legend.appendChild(droneCatDiv);
+  }
+
+  if (droneCarriers.length > 0) {
+    const carrierCatDiv = document.createElement('div');
+    carrierCatDiv.className = 'map-legend-cat map-legend-cat-collapsible collapsed';
+    const carrierHead = document.createElement('div');
+    carrierHead.className = 'map-legend-cat-head';
+    carrierHead.style.cursor = 'pointer';
+    const carrierChevron = document.createElement('span');
+    carrierChevron.className = 'map-legend-cat-chevron';
+    carrierChevron.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 10l5 5 5-5"/></svg>';
+    carrierChevron.setAttribute('aria-label', 'Collapse section');
+    const carrierTitle = document.createElement('span');
+    carrierTitle.className = 'map-legend-cat-title';
+    carrierTitle.style.marginBottom = '0';
+    carrierTitle.textContent = 'Drones in transit (carrying item):';
+    carrierHead.appendChild(carrierChevron);
+    carrierHead.appendChild(carrierTitle);
+    carrierHead.addEventListener('click', () => carrierCatDiv.classList.toggle('collapsed'));
+    carrierCatDiv.appendChild(carrierHead);
+
+    const carrierBody = document.createElement('div');
+    carrierBody.className = 'map-legend-cat-body';
+    const carrierHint = document.createElement('div');
+    carrierHint.className = 'map-legend-cat-title';
+    carrierHint.style.fontSize = '0.7rem';
+    carrierHint.style.color = 'var(--gray-500)';
+    carrierHint.style.marginBottom = '0.35rem';
+    carrierHint.style.marginTop = '0.25rem';
+    carrierHint.textContent = 'Select item to show drones carrying it';
+    carrierBody.appendChild(carrierHint);
+    const carrierPillsWrap = document.createElement('div');
+    carrierPillsWrap.className = 'filter-pills';
+    carrierPillsWrap.style.marginBottom = '0.5rem';
+
+    function isCarrierPillActive(datasetItem) {
+      return (datasetItem === '' && mapDroneCarrierItemFilter === null) ||
+        (datasetItem === MAP_CARRIER_SHOW_ALL && mapDroneCarrierItemFilter === MAP_CARRIER_SHOW_ALL) ||
+        datasetItem === mapDroneCarrierItemFilter;
+    }
+
+    const carrierAllPill = document.createElement('button');
+    carrierAllPill.className = 'pill map-legend-carrier-pill' + (mapDroneCarrierItemFilter === MAP_CARRIER_SHOW_ALL ? ' active' : '');
+    carrierAllPill.dataset.item = MAP_CARRIER_SHOW_ALL;
+    carrierAllPill.textContent = 'All';
+    carrierAllPill.addEventListener('click', () => {
+      mapDroneCarrierItemFilter = MAP_CARRIER_SHOW_ALL;
+      setDroneCarrierMarkersVisibility();
+      carrierCatDiv.querySelectorAll('.map-legend-carrier-pill').forEach(p => {
+        p.classList.toggle('active', isCarrierPillActive(p.dataset.item));
+      });
+    });
+    carrierPillsWrap.appendChild(carrierAllPill);
+
+    const carrierNonePill = document.createElement('button');
+    carrierNonePill.className = 'pill map-legend-carrier-pill' + (mapDroneCarrierItemFilter === null ? ' active' : '');
+    carrierNonePill.dataset.item = '';
+    carrierNonePill.textContent = 'None';
+    carrierNonePill.addEventListener('click', () => {
+      mapDroneCarrierItemFilter = null;
+      setDroneCarrierMarkersVisibility();
+      carrierCatDiv.querySelectorAll('.map-legend-carrier-pill').forEach(p => {
+        p.classList.toggle('active', isCarrierPillActive(p.dataset.item));
+      });
+    });
+    carrierPillsWrap.appendChild(carrierNonePill);
+
+    const carrierItems = [...new Set(droneCarriers.map(d => d.itemDisplayName))].filter(Boolean).sort();
+    carrierItems.forEach(itemName => {
+      const pill = document.createElement('button');
+      pill.className = 'pill map-legend-carrier-pill' + (mapDroneCarrierItemFilter === itemName ? ' active' : '');
+      pill.dataset.item = itemName;
+      pill.innerHTML = `${itemIconHTML(itemName)}${esc(itemName)}`;
+      pill.style.fontSize = '0.75rem';
+      pill.addEventListener('click', () => {
+        mapDroneCarrierItemFilter = mapDroneCarrierItemFilter === itemName ? null : itemName;
+        setDroneCarrierMarkersVisibility();
+        carrierCatDiv.querySelectorAll('.map-legend-carrier-pill').forEach(p => {
+          p.classList.toggle('active', isCarrierPillActive(p.dataset.item));
+        });
+      });
+      carrierPillsWrap.appendChild(pill);
+    });
+    carrierBody.appendChild(carrierPillsWrap);
+    carrierCatDiv.appendChild(carrierBody);
+    legend.appendChild(carrierCatDiv);
+  }
+
   const byCategory = {};
   positions.forEach(p => {
     if (!byCategory[p.category]) byCategory[p.category] = [];
@@ -1885,15 +2364,12 @@ async function processFile(file) {
   } catch (err) {
     console.error('Failed to analyze save file:', err);
     main.innerHTML = '';
-    const errorDiv = h('div', { className: 'error-banner' },
+    main.appendChild(h('div', { className: 'error-banner' },
       `Failed to analyze save file: ${err.message}`
-    );
-    main.appendChild(errorDiv);
-
-    // Re-show picker below the error
-    const pickerDiv = document.createElement('div');
-    main.appendChild(pickerDiv);
-    renderPickerView();
+    ));
+    const pickerWrap = document.createElement('div');
+    main.appendChild(pickerWrap);
+    renderPickerView(pickerWrap);
   } finally {
     loading.classList.add('hidden');
   }
