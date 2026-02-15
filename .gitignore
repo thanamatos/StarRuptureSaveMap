@@ -1,2 +1,6 @@
 # Extracted save JSON (from parse_sav.py --extract)
 save_data.json
+
+# All JSON and SAV files (saves, extracted data, etc.)
+*.json
+*.sav
