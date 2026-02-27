@@ -1162,9 +1162,18 @@ let watchPolling = false;
 let watchFolderInput = null; // reference to the webkitdirectory input for re-triggering
 let watchFolderFiles = null; // FileList from last webkitdirectory selection
 
-// JSON Editor tab is hidden until user clicks tabs in order: Buildings → Production → Shortfalls
-const JSON_EDITOR_UNLOCK_SEQUENCE = ['buildings', 'production', 'shortfalls'];
+
+const UNLOCK_TAB_IDS = ['inventory', 'production', 'shortfalls', 'storage', 'buildings', 'map'];
+
+function getUnlockSequenceForDate(date) {
+  const d = date || new Date();
+  const dayOfMonth = d.getUTCDate();
+  const k = ((dayOfMonth - 1) % 6 + 6) % 6;
+  return [...UNLOCK_TAB_IDS.slice(k), ...UNLOCK_TAB_IDS.slice(0, k)];
+}
+const UNLOCK_SEQUENCE_WINDOW_MS = 8000; 
 let jsonEditorSequenceIndex = 0;
+let unlockSequenceStartTime = 0;
 function isJsonEditorUnlocked() {
   try { return sessionStorage.getItem('rupture-json-editor-unlocked') === '1'; } catch (_) { return false; }
 }
@@ -3645,25 +3654,30 @@ function renderTabs() {
 
   const nav = $('#tabsNav');
   nav.innerHTML = '';
-
+  const tabMeta = {
+    buildings: { id: 'buildings', label: 'Buildings', count: data.totals.buildings },
+    production: { id: 'production', label: 'Production', count: data.totals.productionItems },
+    shortfalls: { id: 'shortfalls', label: 'Shortfalls', count: (data.shortfalls || []).filter(s => s.shortfall > 0).length },
+    storage: { id: 'storage', label: 'Storage', count: data.storage.length },
+    inventory: { id: 'inventory', label: 'Inventory', count: (data.inventory || []).length },
+  };
+  const mapCount = (data.buildingPositions && data.buildingPositions.length) || 0;
   const tabs = [
-    { id: 'buildings', label: 'Buildings', count: data.totals.buildings },
-    { id: 'production', label: 'Production', count: data.totals.productionItems },
-    { id: 'shortfalls', label: 'Shortfalls', count: (data.shortfalls || []).filter(s => s.shortfall > 0).length },
-    { id: 'storage', label: 'Storage', count: data.storage.length },
-    { id: 'inventory', label: 'Inventory', count: (data.inventory || []).length },
+    tabMeta.inventory,
+    tabMeta.production,
+    tabMeta.shortfalls,
+    tabMeta.storage,
+    tabMeta.buildings,
+    { id: 'map', label: 'Map', count: mapCount },
   ];
-  if (data.buildingPositions && data.buildingPositions.length > 0) {
-    tabs.push({ id: 'map', label: 'Map', count: data.buildingPositions.length });
-  }
   const droneCount = (data.transportConnections || []).length;
   if (droneCount > 0) {
     tabs.push({ id: 'drones', label: 'Package transport', count: droneCount });
   }
   if (isJsonEditorUnlocked()) {
-    tabs.push({ id: 'json-editor', label: 'JSON Editor', count: null });
+    tabs.push({ id: 'json-editor', label: 'Editor', count: null });
   } else if (activeTab === 'json-editor') {
-    activeTab = 'buildings';
+    activeTab = 'inventory';
   }
 
   for (const tab of tabs) {
@@ -3681,15 +3695,28 @@ function renderTabs() {
 function switchTab(tabId) {
   if (!isJsonEditorUnlocked()) {
     if (tabId === 'json-editor') {
-      tabId = 'buildings'; // tab is hidden; don't switch to it
-    } else if (tabId === JSON_EDITOR_UNLOCK_SEQUENCE[jsonEditorSequenceIndex]) {
-      jsonEditorSequenceIndex++;
-      if (jsonEditorSequenceIndex >= JSON_EDITOR_UNLOCK_SEQUENCE.length) {
-        jsonEditorSequenceIndex = 0;
-        setJsonEditorUnlocked();
-      }
+      tabId = 'inventory'; // tab is hidden; don't switch to it
     } else {
-      jsonEditorSequenceIndex = 0;
+      const sequence = getUnlockSequenceForDate();
+      const now = Date.now();
+      if (tabId === sequence[jsonEditorSequenceIndex]) {
+        if (jsonEditorSequenceIndex === 0) {
+          unlockSequenceStartTime = now;
+          jsonEditorSequenceIndex = 1;
+        } else if (now - unlockSequenceStartTime > UNLOCK_SEQUENCE_WINDOW_MS) {
+          jsonEditorSequenceIndex = 0;
+          unlockSequenceStartTime = now;
+          jsonEditorSequenceIndex = 1;
+        } else {
+          jsonEditorSequenceIndex++;
+          if (jsonEditorSequenceIndex >= sequence.length) {
+            jsonEditorSequenceIndex = 0;
+            setJsonEditorUnlocked();
+          }
+        }
+      } else {
+        jsonEditorSequenceIndex = 0;
+      }
     }
   }
   activeTab = tabId;
