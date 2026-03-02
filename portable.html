@@ -10,6 +10,7 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
+      --content-max-width: 100rem;
       --dark-900: #0d0d1a;
       --dark-800: #13132b;
       --dark-700: #1a1a3e;
@@ -54,7 +55,7 @@
     }
 
     .header-inner {
-      max-width: 80rem; margin: 0 auto; padding: 0.75rem 1rem;
+      max-width: var(--content-max-width); margin: 0 auto; padding: 0.75rem 1rem;
       display: flex; align-items: center; justify-content: space-between;
     }
 
@@ -77,7 +78,7 @@
     .back-btn svg { width: 1rem; height: 1rem; }
 
     /* ===== Tabs ===== */
-    .tabs-container { max-width: 80rem; margin: 0 auto; padding: 0 1rem; }
+    .tabs-container { max-width: var(--content-max-width); margin: 0 auto; padding: 0 1rem; }
     .tabs-nav { display: flex; gap: 0.25rem; }
 
     .tab-btn {
@@ -102,7 +103,11 @@
     .tab-btn.active .tab-badge { background: rgba(74, 158, 255, 0.2); color: var(--accent-blue); }
 
     /* ===== Main ===== */
-    main { flex: 1; max-width: 80rem; margin: 0 auto; width: 100%; padding: 1.5rem 1rem; }
+    main { flex: 1; max-width: var(--content-max-width); margin: 0 auto; width: 100%; padding: 1.5rem 1rem; }
+
+    body.map-tab-active .header-inner,
+    body.map-tab-active .tabs-container,
+    body.map-tab-active main { max-width: 140rem; }
 
     footer {
       background: var(--dark-800); border-top: 1px solid var(--dark-600);
@@ -3725,6 +3730,7 @@ function switchTab(tabId) {
 }
 
 function renderTabContent() {
+  document.body.classList.toggle('map-tab-active', activeTab === 'map');
   const container = document.getElementById('tabContent');
   if (!container) return;
   container.innerHTML = '';
