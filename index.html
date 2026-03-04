@@ -4040,6 +4040,7 @@ function renderJsonEditorTab(container) {
     h('button', { className: 'btn', id: 'jsonEditorConsolidateBtn', style: 'display:none' }, 'Consolidate inventory stacks'),
     h('button', { className: 'btn', id: 'jsonEditorAddBuildingMatsBtn', style: 'display:none' }, 'Add building materials'),
     h('button', { className: 'btn', id: 'jsonEditorUnlockBlueprintsBtn', style: 'display:none' }, 'Unlock all blueprints'),
+    h('button', { className: 'btn', id: 'jsonEditorUpgradeRailsBtn', style: 'display:none' }, 'Upgrade rails T1 → T3'),
     h('button', { className: 'btn', id: 'jsonEditorSaveBtn', style: 'display:none' }, 'Save as .sav')
   );
   container.appendChild(msgEl);
@@ -4221,6 +4222,35 @@ function renderJsonEditorTab(container) {
     } catch (e) { showMsg('Save failed: ' + (e && e.message), true); }
   }
 
+  const RAIL_T1_PATH = '/Game/Chimera/Buildings/DroneConnections/DroneRail/DA_DroneRailT1.DA_DroneRailT1';
+  const RAIL_T3_PATH = '/Game/Chimera/Buildings/DroneConnections/DroneRail/DA_DroneRailT3.DA_DroneRailT3';
+  async function doUpgradeRails() {
+    let raw = getContent ? getContent() : null;
+    if (raw && typeof raw.then === 'function') raw = await raw;
+    if (raw == null) raw = await getRawJsonFromIdb();
+    const str = (typeof raw === 'string' ? raw : '').trim();
+    if (!str) { showMsg('Nothing to modify.', true); return; }
+    let obj;
+    try { obj = JSON.parse(str); } catch (e) { showMsg('Invalid JSON: ' + e.message, true); return; }
+    const entities = obj && obj.itemData && obj.itemData.Mass && obj.itemData.Mass.entities;
+    if (!entities || typeof entities !== 'object') { showMsg('No entities found in save.', true); return; }
+    let count = 0;
+    for (const [, entity] of Object.entries(entities)) {
+      const sd = entity && entity.spawnData;
+      if (sd && sd.entityConfigDataPath === RAIL_T1_PATH) {
+        sd.entityConfigDataPath = RAIL_T3_PATH;
+        count++;
+      }
+    }
+    if (count === 0) { showMsg('No T1 rails found to upgrade.', false); return; }
+    const newRaw = JSON.stringify(obj);
+    try {
+      await saveRawJsonToIdb(newRaw);
+      if (textareaRef) { textareaRef.value = newRaw; jsonEditorContent = newRaw; }
+      showMsg('Upgraded ' + count + ' rail(s) from T1 to T3. Save as .sav and load in game.', false);
+    } catch (e) { showMsg('Save failed: ' + (e && e.message), true); }
+  }
+
   getRawJsonFromIdb().then(data => {
     panel.innerHTML = '';
     const applyBtn = document.getElementById('jsonEditorApplyBtn');
@@ -4237,10 +4267,12 @@ function renderJsonEditorTab(container) {
       const consolidateBtnEmpty = document.getElementById('jsonEditorConsolidateBtn');
       const addMatsBtnEmpty = document.getElementById('jsonEditorAddBuildingMatsBtn');
       const unlockBpBtnEmpty = document.getElementById('jsonEditorUnlockBlueprintsBtn');
+      const upgradeRailsBtnEmpty = document.getElementById('jsonEditorUpgradeRailsBtn');
       if (removeBtnEmpty) removeBtnEmpty.style.display = 'none';
       if (consolidateBtnEmpty) consolidateBtnEmpty.style.display = 'none';
       if (addMatsBtnEmpty) addMatsBtnEmpty.style.display = 'none';
       if (unlockBpBtnEmpty) unlockBpBtnEmpty.style.display = 'none';
+      if (upgradeRailsBtnEmpty) upgradeRailsBtnEmpty.style.display = 'none';
       if (hint) hint.textContent = '';
       return;
     }
@@ -4256,6 +4288,8 @@ function renderJsonEditorTab(container) {
     if (addMatsBtn) { addMatsBtn.style.display = 'inline-block'; addMatsBtn.onclick = doAddBuildingMaterials; }
     const unlockBpBtn = document.getElementById('jsonEditorUnlockBlueprintsBtn');
     if (unlockBpBtn) { unlockBpBtn.style.display = 'inline-block'; unlockBpBtn.onclick = doUnlockBlueprints; }
+    const upgradeRailsBtn = document.getElementById('jsonEditorUpgradeRailsBtn');
+    if (upgradeRailsBtn) { upgradeRailsBtn.style.display = 'inline-block'; upgradeRailsBtn.onclick = doUpgradeRails; }
 
     if (size > MAX_EDITABLE_JSON_SIZE) {
       const searchEdits = new Map();
