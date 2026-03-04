@@ -4222,8 +4222,11 @@ function renderJsonEditorTab(container) {
     } catch (e) { showMsg('Save failed: ' + (e && e.message), true); }
   }
 
-  const RAIL_T1_PATH = '/Game/Chimera/Buildings/DroneConnections/DroneRail/DA_DroneRailT1.DA_DroneRailT1';
   const RAIL_T3_PATH = '/Game/Chimera/Buildings/DroneConnections/DroneRail/DA_DroneRailT3.DA_DroneRailT3';
+  const RAIL_UPGRADE_PATHS = [
+    '/Game/Chimera/Buildings/DroneConnections/DroneRail/DA_DroneRailT1.DA_DroneRailT1',
+    '/Game/Chimera/Buildings/DroneConnections/DroneRail/DA_DroneRailT2.DA_DroneRailT2',
+  ];
   async function doUpgradeRails() {
     let raw = getContent ? getContent() : null;
     if (raw && typeof raw.then === 'function') raw = await raw;
@@ -4234,20 +4237,23 @@ function renderJsonEditorTab(container) {
     try { obj = JSON.parse(str); } catch (e) { showMsg('Invalid JSON: ' + e.message, true); return; }
     const entities = obj && obj.itemData && obj.itemData.Mass && obj.itemData.Mass.entities;
     if (!entities || typeof entities !== 'object') { showMsg('No entities found in save.', true); return; }
-    let count = 0;
+    let t1 = 0, t2 = 0;
     for (const [, entity] of Object.entries(entities)) {
       const sd = entity && entity.spawnData;
-      if (sd && sd.entityConfigDataPath === RAIL_T1_PATH) {
-        sd.entityConfigDataPath = RAIL_T3_PATH;
-        count++;
-      }
+      if (!sd) continue;
+      if (sd.entityConfigDataPath === RAIL_UPGRADE_PATHS[0]) { sd.entityConfigDataPath = RAIL_T3_PATH; t1++; }
+      else if (sd.entityConfigDataPath === RAIL_UPGRADE_PATHS[1]) { sd.entityConfigDataPath = RAIL_T3_PATH; t2++; }
     }
-    if (count === 0) { showMsg('No T1 rails found to upgrade.', false); return; }
+    const total = t1 + t2;
+    if (total === 0) { showMsg('No T1/T2 rails found to upgrade.', false); return; }
+    const parts = [];
+    if (t1) parts.push(t1 + ' T1');
+    if (t2) parts.push(t2 + ' T2');
     const newRaw = JSON.stringify(obj);
     try {
       await saveRawJsonToIdb(newRaw);
       if (textareaRef) { textareaRef.value = newRaw; jsonEditorContent = newRaw; }
-      showMsg('Upgraded ' + count + ' rail(s) from T1 to T3. Save as .sav and load in game.', false);
+      showMsg('Upgraded ' + parts.join(' + ') + ' rail(s) to T3 (' + total + ' total). Save as .sav and load in game.', false);
     } catch (e) { showMsg('Save failed: ' + (e && e.message), true); }
   }
 
