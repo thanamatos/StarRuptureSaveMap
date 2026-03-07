@@ -1010,8 +1010,7 @@ const RECIPE_INPUTS_FOR_ANALYSIS = Object.assign({
 
 const CATEGORY_ORDER = [
   'Extraction', 'Ore Processing', 'Crafting', 'Base Core', 'Storage and Transport',
-  'Rails', 'Junctions', 'Power', 'Cooling', 'Defensive', 'Habitats',
-  'Habitat Modules', 'Progression', 'Modular Components',
+  'Power', 'Cooling', 'Defensive', 'Habitats',
 ];
 
 // Build cost per building (Name -> [{ itemName, amount }]). Used when refunding materials on remove.
@@ -1360,12 +1359,13 @@ let inventorySortField = 'name';
 let inventorySortDir = 'asc';
 
 let dronesItemFilter = null;
+let railCircuitExpanded = new Set();
 
 let mapScale = 1;
 let mapTranslateX = 0;
 let mapTranslateY = 0;
 let mapDragStart = null;
-const MAP_DEFAULT_VISIBLE_CATEGORY = 'Crafting';
+const MAP_DEFAULT_VISIBLE_CATEGORIES = new Set(['Crafting', 'Ore Processing', 'Extraction']);
 let mapBuildingVisibility = {};
 let mapViewMode = 'buildings'; // 'buildings' | 'production'
 let mapAreaVisibility = {}; // area id -> true/false; default true when undefined
@@ -3130,6 +3130,7 @@ function analyze(jsonContent) {
 
   const production = new Map();
   const storage = new Map();
+  const storageByEntity = new Map();
   const buildingPositions = [];
 
   for (const [entityIdKey, entityValue] of Object.entries(entities)) {
@@ -3190,8 +3191,10 @@ function analyze(jsonContent) {
     }
 
     // Include inventory from fragmentValues and/or itemsArray
+    const entityStoredItems = new Map();
     if (Array.isArray(fragmentValues)) {
       parseStoredItems(fragmentValues, storage, data.ItemNames);
+      parseStoredItems(fragmentValues, entityStoredItems, data.ItemNames);
     }
     const itemsObjForStorage = entityValue.itemsArray != null ? entityValue : findItemsArrayUnder(entityValue, 4, null);
     const entityItemsArr = itemsObjForStorage && (itemsObjForStorage.itemsArray || itemsObjForStorage.ItemsArray);
@@ -3205,8 +3208,10 @@ function analyze(jsonContent) {
         if (!itemId) continue;
         const displayName = resolveItemName(itemId, data.ItemNames);
         storage.set(displayName, (storage.get(displayName) || 0) + amount);
+        entityStoredItems.set(displayName, (entityStoredItems.get(displayName) || 0) + amount);
       }
     }
+    if (entityStoredItems.size > 0) storageByEntity.set(String(entityIdKey), entityStoredItems);
 
     if (!fragmentValues) continue;
 
@@ -3237,6 +3242,7 @@ function analyze(jsonContent) {
     const count = counts.get(b.Name) || 0;
     if (count === 0) continue;
     const category = b.Category || 'Other';
+    if (category === 'Rails' || category === 'Junctions' || category === 'Habitat Modules' || category === 'Modular Components' || category === 'Progression') continue;
     if (!categoryMap.has(category)) categoryMap.set(category, []);
     categoryMap.get(category).push({ name: b.Name, count });
   }
@@ -3539,11 +3545,293 @@ function analyze(jsonContent) {
     });
   }
 
+  // ===== Rail circuit analysis =====
+  let railCircuits = [];
+  try {
+  const RAIL_TIER_CAPACITY = { 1: 120, 2: 240, 3: 480 };
+  const RAIL_PATH_PREFIX = '/Game/Chimera/Buildings/DroneConnections/DroneRail/DA_DroneRailT';
+  const JUNCTION_PATH = '/Game/Chimera/Buildings/DroneConnections/DroneJunction/';
+  const SPLINE_START_RE = /StartEntity=\(ID=(\d+)\)/;
+  const SPLINE_END_RE = /EndEntity=\(ID=(\d+)\)/;
+  const SPLINE_LEN_RE = /SplineRealLength=([-\d.]+)/;
+
+  const railSegments = [];
+  const junctionNodeIds = new Set();
+  const nodePos = new Map();
+  const graph = new Map(); // nodeId -> [{ to, railIdx, weight }]
+  const attachmentsByEntity = new Map(); // terminal building id -> [{ nodeId, railIdx }]
+  const entityIdToName = new Map();
+  for (const p of buildingPositions) {
+    if (p.entityId != null) entityIdToName.set(String(p.entityId).replace(/^\(ID=|\)$/g, ''), (p.displayName && p.displayName.trim()) ? p.displayName.trim() : p.name);
+  }
+
+  function addGraphEdge(a, b, railIdx, weight) {
+    if (!graph.has(a)) graph.set(a, []);
+    if (!graph.has(b)) graph.set(b, []);
+    graph.get(a).push({ to: b, railIdx, weight });
+    graph.get(b).push({ to: a, railIdx, weight });
+  }
+  function addAttachment(entityId, nodeId, railIdx) {
+    if (!attachmentsByEntity.has(entityId)) attachmentsByEntity.set(entityId, []);
+    attachmentsByEntity.get(entityId).push({ nodeId, railIdx });
+  }
+
+  for (const [entityIdKey, entityValue] of Object.entries(entities)) {
+    if (!entityValue) continue;
+    let sd;
+    try { sd = getJsonItems(entityValue, 'spawnData'); } catch { continue; }
+    const cfgPath = String(sd.entityConfigDataPath || sd.EntityConfigDataPath || '');
+
+    if (cfgPath.startsWith(RAIL_PATH_PREFIX)) {
+      const tierChar = cfgPath.charAt(RAIL_PATH_PREFIX.length);
+      const tier = parseInt(tierChar, 10) || 1;
+      const fv = entityValue.fragmentValues || entityValue.FragmentValues || [];
+      let startId = null, endId = null, startPos = null, endPos = null, length = null;
+      for (const f of fv) {
+        const s = String(f);
+        if (s.indexOf('AuSplineConnectionFragment') !== -1) {
+          const sm = SPLINE_START_RE.exec(s);
+          const em = SPLINE_END_RE.exec(s);
+          const lm = SPLINE_LEN_RE.exec(s);
+          if (sm) startId = sm[1];
+          if (em) endId = em[1];
+          if (lm) length = parseFloat(lm[1]);
+          const posMatch = s.match(/SplineData=\(\(Position=\(X=([-\d.]+),Y=([-\d.]+),Z=([-\d.]+)\)/);
+          if (posMatch) startPos = { x: parseFloat(posMatch[1]), y: parseFloat(posMatch[2]) };
+          const endPosMatch = s.match(/Index=1,Position=\(X=([-\d.]+),Y=([-\d.]+),Z=([-\d.]+)\)/);
+          if (endPosMatch) endPos = { x: parseFloat(endPosMatch[1]), y: parseFloat(endPosMatch[2]) };
+          break;
+        }
+      }
+      if (startId && endId) {
+        const rail = {
+          entityId: entityIdKey,
+          tier,
+          startId,
+          endId,
+          startPos,
+          endPos,
+          length: Number.isFinite(length) && length > 0 ? length : Math.hypot((endPos ? endPos.x : 0) - (startPos ? startPos.x : 0), (endPos ? endPos.y : 0) - (startPos ? startPos.y : 0)),
+          capacity: RAIL_TIER_CAPACITY[tier] || 120,
+          load: 0,
+          requests: 0,
+          overloaded: false
+        };
+        const railIdx = railSegments.length;
+        railSegments.push(rail);
+        addGraphEdge(startId, endId, railIdx, rail.length || 1);
+        if (startPos) nodePos.set(startId, startPos);
+        if (endPos) nodePos.set(endId, endPos);
+      }
+    } else if (cfgPath.startsWith(JUNCTION_PATH)) {
+      const id = String(entityIdKey).replace(/^\(ID=|\)$/g, '');
+      junctionNodeIds.add(id);
+      const pos = extractPosition(sd);
+      if (pos) nodePos.set(id, { x: pos.x, y: pos.y });
+    }
+  }
+
+  for (let i = 0; i < railSegments.length; i++) {
+    const r = railSegments[i];
+    if (!junctionNodeIds.has(r.startId)) addAttachment(r.startId, r.endId, i);
+    if (!junctionNodeIds.has(r.endId)) addAttachment(r.endId, r.startId, i);
+  }
+
+  // Suppliers by item
+  const suppliersByItem = new Map(); // itemName -> [{ entityId, sourceType }]
+  function addSupplier(itemName, entityId, sourceType) {
+    if (!itemName || !entityId) return;
+    const id = String(entityId).replace(/^\(ID=|\)$/g, '');
+    if (!suppliersByItem.has(itemName)) suppliersByItem.set(itemName, []);
+    const arr = suppliersByItem.get(itemName);
+    if (!arr.some(s => s.entityId === id)) arr.push({ entityId: id, sourceType });
+  }
+  for (const p of buildingPositions) {
+    if (p.entityId != null && p.producedItem && (p.producedPerMinute || 0) > 0) addSupplier(p.producedItem, p.entityId, 'producer');
+  }
+  for (const conn of transportConnections) {
+    addSupplier(conn.itemDisplayName, conn.senderId, 'package-sender');
+  }
+  for (const [entityId, itemMap] of storageByEntity.entries()) {
+    for (const [itemName, count] of itemMap.entries()) {
+      if (count > 0) addSupplier(itemName, entityId, 'storage');
+    }
+  }
+
+  // Request data from logistics subsystem (all pull requests)
+  let requestData = {};
+  try {
+    requestData = getJsonItems(root, 'itemData/Mass/logisticsRequestSubsystemState/requestData');
+  } catch (_) {
+    try { requestData = getJsonItems(root, 'itemData/Mass/LogisticsRequestSubsystemState/requestData'); } catch (_) {}
+  }
+
+  function itemDisplayNameFromDataBase(itemDataBase) {
+    const itemId = extractItemIdentifier(itemDataBase) || extractItemIdFromPath(itemDataBase);
+    return itemId ? resolveItemName(itemId, data.ItemNames) : itemDataBase;
+  }
+
+  function shortestPathBetweenEntities(startEntityId, endEntityId) {
+    const startId = String(startEntityId).replace(/^\(ID=|\)$/g, '');
+    const endId = String(endEntityId).replace(/^\(ID=|\)$/g, '');
+    if (startId === endId) return { dist: 0, railIndices: [] };
+    if (!graph.has(startId) || !graph.has(endId)) return null;
+    const dist = new Map([[startId, 0]]);
+    const prev = new Map(); // nodeId -> { node, railIdx }
+    const visited = new Set();
+    const queue = [{ node: startId, dist: 0 }];
+    while (queue.length > 0) {
+      queue.sort((a, b) => a.dist - b.dist);
+      const cur = queue.shift();
+      if (!cur || visited.has(cur.node)) continue;
+      visited.add(cur.node);
+      if (cur.node === endId) break;
+      const isTerminal = !junctionNodeIds.has(cur.node);
+      if (isTerminal && cur.node !== startId) continue; // buildings are terminals; don't traverse through them
+      for (const edge of (graph.get(cur.node) || [])) {
+        const nd = cur.dist + (edge.weight || 1);
+        if (nd < (dist.get(edge.to) ?? Infinity)) {
+          dist.set(edge.to, nd);
+          prev.set(edge.to, { node: cur.node, railIdx: edge.railIdx });
+          queue.push({ node: edge.to, dist: nd });
+        }
+      }
+    }
+    if (!dist.has(endId)) return null;
+    const railIndices = [];
+    let cur = endId;
+    while (prev.has(cur)) {
+      const p = prev.get(cur);
+      railIndices.push(p.railIdx);
+      cur = p.node;
+    }
+    railIndices.reverse();
+    return { dist: dist.get(endId), railIndices };
+  }
+
+  const requestSummaries = [];
+  for (const req of Object.values(requestData || {})) {
+    if (!req || typeof req !== 'object') continue;
+    const wanted = req.wantedItem || req.WantedItem;
+    const requester = req.requesterEntity || req.RequesterEntity;
+    const requesterId = requester && (requester.iD != null ? requester.iD : requester.ID);
+    if (!wanted || requesterId == null) continue;
+    const type = req.type || req.Type;
+    if (type && type !== 'Acquire') continue;
+    const itemDataBase = wanted.itemDataBase || wanted.ItemDataBase || '';
+    const itemName = itemDisplayNameFromDataBase(itemDataBase);
+    const requestedAmount = Number(wanted.count || wanted.Count || 0);
+    if (!itemName || requestedAmount <= 0) continue;
+
+    const runtimeData = Array.isArray(req.runtimeData || req.RuntimeData) ? (req.runtimeData || req.RuntimeData) : [];
+    const runtimeSources = [...new Set(runtimeData.map(rt => {
+      const src = rt && (rt.itemSource || rt.ItemSource);
+      return src && (src.iD != null ? String(src.iD) : (src.ID != null ? String(src.ID) : null));
+    }).filter(Boolean))];
+
+    let candidates = [];
+    if (runtimeSources.length > 0) {
+      candidates = runtimeSources.map(id => ({ entityId: id, sourceType: 'runtime' }));
+    } else {
+      candidates = (suppliersByItem.get(itemName) || []).filter(s => s.entityId !== String(requesterId));
+    }
+    if (candidates.length === 0) continue;
+
+    let best = null;
+    for (const cand of candidates) {
+      const path = shortestPathBetweenEntities(cand.entityId, requesterId);
+      if (!path) continue;
+      if (!best || path.dist < best.path.dist) best = { supplier: cand, path };
+    }
+    if (!best || !best.path || best.path.railIndices.length === 0) continue;
+
+    let bottleneck = Infinity;
+    for (const ri of best.path.railIndices) {
+      bottleneck = Math.min(bottleneck, railSegments[ri].capacity);
+    }
+    const requestRate = packageSenderRate(Number.isFinite(bottleneck) ? bottleneck : PACKAGE_SENDER_DEFAULT_RAIL_RATE, requestedAmount);
+    if (requestRate <= 0) continue;
+
+    for (const ri of best.path.railIndices) {
+      railSegments[ri].load += requestRate;
+      railSegments[ri].requests += 1;
+    }
+    requestSummaries.push({
+      requesterId: String(requesterId),
+      requesterName: entityIdToName.get(String(requesterId)) || ('(ID=' + requesterId + ')'),
+      itemName,
+      requestedAmount,
+      requestRate,
+      supplierId: best.supplier.entityId,
+      supplierName: entityIdToName.get(String(best.supplier.entityId)) || ('(ID=' + best.supplier.entityId + ')'),
+      railIndices: best.path.railIndices
+    });
+  }
+
+  // Connected components for grouping/display only
+  const ufParent = new Map();
+  function ufFind(x) {
+    if (!ufParent.has(x)) ufParent.set(x, x);
+    let root = x;
+    while (ufParent.get(root) !== root) root = ufParent.get(root);
+    while (ufParent.get(x) !== root) { const next = ufParent.get(x); ufParent.set(x, root); x = next; }
+    return root;
+  }
+  function ufUnion(a, b) { ufParent.set(ufFind(a), ufFind(b)); }
+  for (const r of railSegments) ufUnion(r.startId, r.endId);
+
+  const componentMap = new Map();
+  for (let i = 0; i < railSegments.length; i++) {
+    const r = railSegments[i];
+    const rootId = ufFind(r.startId);
+    if (!componentMap.has(rootId)) componentMap.set(rootId, { railIndices: [], nodeIds: new Set() });
+    const comp = componentMap.get(rootId);
+    comp.railIndices.push(i);
+    comp.nodeIds.add(r.startId);
+    comp.nodeIds.add(r.endId);
+  }
+
+  let circuitIdx = 0;
+  for (const [, comp] of componentMap) {
+    const rails = comp.railIndices.map(ri => {
+      const r = railSegments[ri];
+      r.load = Math.round(r.load * 100) / 100;
+      r.overloaded = r.load > r.capacity;
+      return r;
+    });
+    const minTier = rails.reduce((m, r) => Math.min(m, r.tier), Infinity);
+    const requests = requestSummaries.filter(req => req.railIndices.some(ri => comp.railIndices.includes(ri)));
+    const items = [...new Set(requests.map(r => r.itemName))].sort();
+    const overloadedSegments = rails.filter(r => r.overloaded);
+    const totalDemand = requests.reduce((s, r) => s + r.requestRate, 0);
+    const junctions = [...comp.nodeIds].filter(nid => junctionNodeIds.has(nid)).map(nid => ({
+      entityId: '(ID=' + nid + ')',
+      x: nodePos.get(nid)?.x || 0,
+      y: nodePos.get(nid)?.y || 0
+    }));
+    railCircuits.push({
+      id: circuitIdx++,
+      rails,
+      junctions,
+      senders: requests,
+      nodeIds: comp.nodeIds,
+      minTier,
+      capacity: Number.isFinite(minTier) ? (RAIL_TIER_CAPACITY[minTier] || 120) : 0,
+      totalDemand: Math.round(totalDemand * 100) / 100,
+      oversubscribed: overloadedSegments.length > 0,
+      overloadedSegments,
+      bridges: [],
+      items
+    });
+  }
+  railCircuits.sort((a, b) => (b.overloadedSegments.length - a.overloadedSegments.length) || (b.totalDemand - a.totalDemand));
+  } catch (e) { console.error('Rail circuit analysis error:', e); railCircuits = []; }
+
   return {
     buildingCategories, production: productionArr, storage: storageArr,
     inventory: inventoryArr,
     buildingPositions, transportConnections, droneCarriers, productionByArea,
-    shortfalls,
+    shortfalls, railCircuits,
     totals: { buildings: totalBuildings, productionItems: productionArr.length, storedItems: totalStoredItems, inventoryItems: totalInventoryItems, shortfalls: shortfalls.length }
   };
 }
@@ -3748,7 +4036,13 @@ function renderTabContent() {
 // ===== Buildings Tab =====
 function renderBuildingsTab(container) {
   const data = analysisData;
-  const categories = data.buildingCategories;
+  const categories = (data.buildingCategories || []).filter(cat =>
+    cat.category !== 'Rails' &&
+    cat.category !== 'Junctions' &&
+    cat.category !== 'Habitat Modules' &&
+    cat.category !== 'Modular Components' &&
+    cat.category !== 'Progression'
+  );
 
   const filtered = categories
     .map(cat => ({
@@ -4680,7 +4974,141 @@ function renderInventoryTab(container) {
 // ===== Package transport Tab (sender → receiver connections, filter by item) =====
 function renderDronesTab(container) {
   const connections = analysisData.transportConnections || [];
+  const railCircuits = analysisData.railCircuits || [];
   const itemNames = [...new Set(connections.map(c => c.itemDisplayName))].filter(Boolean).sort();
+
+  // Rail circuits section
+  if (railCircuits.length > 0) {
+    const circuitsPanel = h('div', { className: 'panel', style: 'margin-bottom:1rem' });
+    const circuitsHeader = h('div', { style: 'display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem' },
+      h('h3', { style: 'font-size:0.9375rem;font-weight:600;color:var(--gray-200);margin:0' }, 'Rail Circuits'),
+      h('span', { style: 'font-size:0.8125rem;color:var(--gray-500)' },
+        railCircuits.length + ' circuit' + (railCircuits.length === 1 ? '' : 's') +
+        (railCircuits.some(c => c.oversubscribed) ? ' · ' : ''),
+        railCircuits.some(c => c.oversubscribed)
+          ? h('span', { style: 'color:var(--red-400)' }, railCircuits.filter(c => c.oversubscribed).length + ' oversubscribed')
+          : null
+      )
+    );
+    circuitsPanel.appendChild(circuitsHeader);
+
+    for (const circuit of railCircuits) {
+      const overloadedCount = (circuit.overloadedSegments || []).length;
+      const isOver = overloadedCount > 0;
+      const expanded = railCircuitExpanded.has(circuit.id);
+      const card = h('div', {
+        style: 'padding:0.625rem 0.75rem;border-radius:0.375rem;margin-bottom:0.5rem;' +
+          'border:1px solid ' + (isOver ? 'var(--red-700)' : 'var(--dark-600)') + ';' +
+          'background:' + (isOver ? 'rgba(127,29,29,0.15)' : 'var(--dark-800)')
+      });
+      const titleRow = h('div', { style: 'display:flex;align-items:center;justify-content:space-between;margin-bottom:0.375rem' },
+        h('span', { style: 'font-weight:600;font-size:0.875rem;color:' + (isOver ? 'var(--red-300)' : 'var(--gray-200)') },
+          'Circuit ' + (circuit.id + 1)
+        ),
+        h('span', {
+          style: 'font-size:0.75rem;padding:0.125rem 0.5rem;border-radius:0.25rem;font-weight:600;' +
+            (isOver
+              ? 'background:rgba(220,38,38,0.2);color:var(--red-400)'
+              : 'background:rgba(34,197,94,0.15);color:var(--accent-green)')
+        }, isOver ? 'OVERSUBSCRIBED' : 'OK')
+      );
+      card.appendChild(titleRow);
+
+      const statsRow = h('div', { style: 'display:flex;gap:1.5rem;flex-wrap:wrap;font-size:0.8125rem;color:var(--gray-400);margin-bottom:0.25rem' },
+        h('span', null, 'Rails: ', h('span', { style: 'color:var(--gray-200)' }, String(circuit.rails.length))),
+        h('span', null, 'Min tier: ', h('span', { style: 'color:var(--gray-200)' }, 'T' + circuit.minTier)),
+        h('span', null, 'Base cap: ', h('span', { style: 'color:var(--accent-green)' }, circuit.capacity + '/min')),
+        h('span', null, 'Demand: ', h('span', { style: 'color:' + (isOver ? 'var(--red-400)' : 'var(--gray-200)') }, circuit.totalDemand + '/min')),
+        h('span', null, 'Requests: ', h('span', { style: 'color:var(--gray-200)' }, String(circuit.senders.length))),
+        h('span', null, 'Overloaded segs: ', h('span', { style: 'color:' + (isOver ? 'var(--red-400)' : 'var(--gray-200)') }, String(overloadedCount)))
+      );
+      card.appendChild(statsRow);
+
+      if (circuit.items.length > 0) {
+        const itemsRow = h('div', { style: 'font-size:0.75rem;color:var(--gray-500);margin-top:0.25rem' },
+          'Items: ' + circuit.items.join(', ')
+        );
+        card.appendChild(itemsRow);
+      }
+      if (isOver) {
+        const worst = [...circuit.rails].sort((a, b) => (b.load / Math.max(1, b.capacity)) - (a.load / Math.max(1, a.capacity)))[0];
+        if (worst) {
+          const overRow = h('div', { style: 'font-size:0.75rem;color:var(--accent-amber);margin-top:0.25rem' },
+            'Worst segment: ' + worst.load.toFixed(1) + '/' + worst.capacity + ' per min'
+          );
+          card.appendChild(overRow);
+        }
+      }
+
+      const toggleBtn = h('button', {
+        className: 'btn',
+        style: 'margin-top:0.5rem;font-size:0.75rem;padding:0.3rem 0.6rem',
+        onclick: () => {
+          if (railCircuitExpanded.has(circuit.id)) railCircuitExpanded.delete(circuit.id);
+          else railCircuitExpanded.add(circuit.id);
+          renderTabContent();
+        }
+      }, expanded ? 'Hide details' : 'Show details');
+      card.appendChild(toggleBtn);
+
+      if (expanded) {
+        const details = h('div', {
+          style: 'margin-top:0.75rem;padding-top:0.75rem;border-top:1px solid var(--dark-600)'
+        });
+
+        const segTitle = h('div', {
+          style: 'font-size:0.8rem;font-weight:600;color:var(--gray-200);margin-bottom:0.4rem'
+        }, 'Segments');
+        details.appendChild(segTitle);
+
+        const segList = h('div', { style: 'display:flex;flex-direction:column;gap:0.3rem' });
+        const sortedRails = [...circuit.rails].sort((a, b) => (b.load / Math.max(1, b.capacity)) - (a.load / Math.max(1, a.capacity)));
+        for (const rail of sortedRails) {
+          const loadRatio = rail.capacity > 0 ? (rail.load / rail.capacity) : 0;
+          const segRow = h('div', {
+            style: 'font-size:0.75rem;color:' + (rail.overloaded ? 'var(--red-300)' : 'var(--gray-400)') +
+              ';display:flex;justify-content:space-between;gap:1rem'
+          },
+            h('span', null, rail.entityId + ' · T' + rail.tier),
+            h('span', null, rail.load.toFixed(1) + '/' + rail.capacity + '/min (' + Math.round(loadRatio * 100) + '%)')
+          );
+          segList.appendChild(segRow);
+        }
+        details.appendChild(segList);
+
+        if (circuit.senders && circuit.senders.length > 0) {
+          const reqTitle = h('div', {
+            style: 'font-size:0.8rem;font-weight:600;color:var(--gray-200);margin:0.8rem 0 0.4rem'
+          }, 'Requests');
+          details.appendChild(reqTitle);
+
+          const reqList = h('div', { style: 'display:flex;flex-direction:column;gap:0.3rem' });
+          const sortedReqs = [...circuit.senders].sort((a, b) => (b.requestRate || 0) - (a.requestRate || 0));
+          for (const req of sortedReqs.slice(0, 20)) {
+            const reqRow = h('div', {
+              style: 'font-size:0.75rem;color:var(--gray-400);display:flex;justify-content:space-between;gap:1rem'
+            },
+              h('span', {
+                style: 'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'
+              }, req.itemName + ': ' + req.supplierName + ' -> ' + req.requesterName),
+              h('span', { style: 'flex-shrink:0' }, (req.requestRate || 0).toFixed(1) + '/min')
+            );
+            reqList.appendChild(reqRow);
+          }
+          if (sortedReqs.length > 20) {
+            reqList.appendChild(h('div', {
+              style: 'font-size:0.72rem;color:var(--gray-500)'
+            }, 'Showing first 20 of ' + sortedReqs.length + ' requests'));
+          }
+          details.appendChild(reqList);
+        }
+
+        card.appendChild(details);
+      }
+      circuitsPanel.appendChild(card);
+    }
+    container.appendChild(circuitsPanel);
+  }
 
   let filtered = connections;
   if (dronesItemFilter != null && dronesItemFilter !== '') {
@@ -4751,8 +5179,6 @@ function renderDronesTab(container) {
 }
 
 // ===== Map Tab (StarRuptureMap-style: fixed viewBox, base map, transport lines) =====
-let mapDronesItemFilter = null;
-let mapDroneCarrierItemFilter = null;
 function renderMapTab(container) {
   const positions = analysisData.buildingPositions || [];
   const transportConnections = analysisData.transportConnections || [];
@@ -4834,91 +5260,34 @@ function renderMapTab(container) {
   img.setAttribute('opacity', '0.85');
   g.appendChild(img);
 
-  const linesGrp = document.createElementNS(svgNs, 'g');
-  linesGrp.id = 'mapTransportLines';
-  (analysisData.transportConnections || []).forEach(conn => {
-    const s = worldToMapCoords(conn.senderPos.x, conn.senderPos.y);
-    const r = worldToMapCoords(conn.receiverPos.x, conn.receiverPos.y);
-    const line = document.createElementNS(svgNs, 'line');
-    line.setAttribute('x1', s.x);
-    line.setAttribute('y1', s.y);
-    line.setAttribute('x2', r.x);
-    line.setAttribute('y2', r.y);
-    line.setAttribute('stroke', '#8080ff');
-    line.setAttribute('stroke-width', '2');
-    line.setAttribute('stroke-opacity', '0.7');
-    line.setAttribute('data-layer', 'transport');
-    line.setAttribute('data-item', conn.itemDisplayName || '');
-    linesGrp.appendChild(line);
-  });
-  function setDroneLinesVisibility() {
-    const grp = document.getElementById('mapTransportLines');
-    if (!grp) return;
-    if (mapViewMode === 'production') {
-      grp.style.display = 'none';
-      return;
+  // Rail circuit overlay
+  const CIRCUIT_COLORS = ['#60a5fa', '#a78bfa', '#34d399', '#fbbf24', '#f472b6', '#22d3ee', '#fb923c', '#818cf8', '#4ade80', '#e879f9'];
+  const railCircuits = analysisData.railCircuits || [];
+  const railsGrp = document.createElementNS(svgNs, 'g');
+  railsGrp.id = 'mapRailCircuits';
+  try {
+    for (const circuit of railCircuits) {
+      const baseColor = CIRCUIT_COLORS[circuit.id % CIRCUIT_COLORS.length];
+      for (const rail of circuit.rails) {
+        if (!rail.startPos || !rail.endPos) continue;
+        const s = worldToMapCoords(rail.startPos.x, rail.startPos.y);
+        const e = worldToMapCoords(rail.endPos.x, rail.endPos.y);
+        const line = document.createElementNS(svgNs, 'line');
+        line.setAttribute('x1', s.x); line.setAttribute('y1', s.y);
+        line.setAttribute('x2', e.x); line.setAttribute('y2', e.y);
+        const isOverloaded = !!rail.overloaded;
+        line.setAttribute('stroke', isOverloaded ? '#ef4444' : baseColor);
+        line.setAttribute('stroke-width', '2');
+        line.setAttribute('stroke-opacity', isOverloaded ? '0.95' : '0.55');
+        line.setAttribute('stroke-linecap', 'round');
+        if (isOverloaded) line.setAttribute('data-overloaded', '1');
+        line.setAttribute('data-circuit', String(circuit.id));
+        railsGrp.appendChild(line);
+      }
     }
-    grp.style.display = '';
-    for (let i = 0; i < grp.children.length; i++) {
-      const line = grp.children[i];
-      const item = line.getAttribute('data-item');
-      line.style.display = (mapDronesItemFilter == null || mapDronesItemFilter === '' || item === mapDronesItemFilter) ? '' : 'none';
-    }
-  }
-  if (mapViewMode === 'production') {
-    linesGrp.style.display = 'none';
-  } else {
-    linesGrp.style.display = '';
-    for (let i = 0; i < linesGrp.children.length; i++) {
-      const line = linesGrp.children[i];
-      const item = line.getAttribute('data-item');
-      line.style.display = (mapDronesItemFilter == null || mapDronesItemFilter === '' || item === mapDronesItemFilter) ? '' : 'none';
-    }
-  }
-  g.appendChild(linesGrp);
-
-  const droneCarriers = analysisData.droneCarriers || [];
-  const droneMarkersGrp = document.createElementNS(svgNs, 'g');
-  droneMarkersGrp.id = 'mapDroneCarrierMarkers';
-  droneCarriers.forEach(d => {
-    const m = worldToMapCoords(d.x, d.y);
-    const circle = document.createElementNS(svgNs, 'circle');
-    circle.setAttribute('cx', m.x);
-    circle.setAttribute('cy', m.y);
-    circle.setAttribute('r', 6);
-    circle.setAttribute('fill', '#06b6d4');
-    circle.setAttribute('stroke', '#0e7490');
-    circle.setAttribute('stroke-width', '1.5');
-    circle.setAttribute('data-item', d.itemDisplayName || '');
-    circle.setAttribute('opacity', '0.9');
-    droneMarkersGrp.appendChild(circle);
-  });
-  const MAP_CARRIER_SHOW_ALL = '\u200b**all**'; // sentinel for "show all" drone markers
-  function setDroneCarrierMarkersVisibility() {
-    const grp = document.getElementById('mapDroneCarrierMarkers');
-    if (!grp) return;
-    if (mapViewMode === 'production' || mapDroneCarrierItemFilter == null || mapDroneCarrierItemFilter === '') {
-      grp.style.display = 'none';
-      return;
-    }
-    grp.style.display = '';
-    const showAll = (mapDroneCarrierItemFilter === MAP_CARRIER_SHOW_ALL);
-    for (let i = 0; i < grp.children.length; i++) {
-      const el = grp.children[i];
-      el.style.display = (showAll || el.getAttribute('data-item') === mapDroneCarrierItemFilter) ? '' : 'none';
-    }
-  }
-  if (mapViewMode === 'production' || mapDroneCarrierItemFilter == null || mapDroneCarrierItemFilter === '') {
-    droneMarkersGrp.style.display = 'none';
-  } else {
-    droneMarkersGrp.style.display = '';
-    const showAll = (mapDroneCarrierItemFilter === MAP_CARRIER_SHOW_ALL);
-    for (let i = 0; i < droneMarkersGrp.children.length; i++) {
-      const el = droneMarkersGrp.children[i];
-      el.style.display = (showAll || el.getAttribute('data-item') === mapDroneCarrierItemFilter) ? '' : 'none';
-    }
-  }
-  g.appendChild(droneMarkersGrp);
+  } catch (e) { console.error('Rail circuit overlay error:', e); }
+  railsGrp.style.display = mapViewMode === 'production' ? 'none' : '';
+  g.appendChild(railsGrp);
 
   const buildingRectsGrp = document.createElementNS(svgNs, 'g');
   buildingRectsGrp.id = 'mapBuildingRects';
@@ -4932,29 +5301,19 @@ function renderMapTab(container) {
   // Initialize visibility: by default only Crafting is enabled
   positions.forEach(p => {
     if (mapBuildingVisibility[p.name] === undefined) {
-      mapBuildingVisibility[p.name] = (p.category === MAP_DEFAULT_VISIBLE_CATEGORY);
+      mapBuildingVisibility[p.name] = MAP_DEFAULT_VISIBLE_CATEGORIES.has(p.category);
     }
   });
   const mapSpan = Math.min(vbW, vbH);
   const minSize = 2;
   const maxSize = mapSpan * 0.015;
-  function setRectVisibility(grp, visibilityMap) {
-    for (let i = 0; i < grp.children.length; i++) {
-      const el = grp.children[i];
-      const name = el.getAttribute('data-name');
-      const category = el.getAttribute('data-category');
-      const areaIdStr = el.getAttribute('data-area-id');
-      const areaId = areaIdStr != null ? Number(areaIdStr) : null;
-      if (name == null) continue;
-      if (mapViewMode === 'production') {
-        const areaVisible = areaId != null && mapAreaVisibility[areaId] !== false;
-        el.style.display = (MAP_PRODUCTION_CATEGORIES.has(category) && areaVisible) ? '' : 'none';
-      } else {
-        el.style.display = visibilityMap[name] !== false ? '' : 'none';
-      }
-    }
-  }
+  const visiblePositions = [];
   positions.forEach(p => {
+    const isVisible = mapViewMode === 'production'
+      ? (p.areaId != null && MAP_PRODUCTION_CATEGORIES.has(p.category) && mapAreaVisibility[p.areaId] !== false)
+      : (mapBuildingVisibility[p.name] !== false);
+    if (!isVisible) return;
+    visiblePositions.push(p);
     const m = worldToMapCoords(p.x, p.y);
     const size = Math.max(minSize, Math.min(maxSize, mapSizeForBuilding(p.name)));
     const rect = document.createElementNS(svgNs, 'rect');
@@ -4969,9 +5328,6 @@ function renderMapTab(container) {
     rect.setAttribute('data-category', p.category);
     if (p.areaId != null) rect.setAttribute('data-area-id', String(p.areaId));
     rect.style.cursor = 'pointer';
-    rect.style.display = mapViewMode === 'production'
-      ? (p.areaId != null && MAP_PRODUCTION_CATEGORIES.has(p.category) && mapAreaVisibility[p.areaId] !== false ? '' : 'none')
-      : (mapBuildingVisibility[p.name] !== false ? '' : 'none');
     buildingRectsGrp.appendChild(rect);
   });
   g.appendChild(buildingRectsGrp);
@@ -5064,7 +5420,7 @@ function renderMapTab(container) {
   function hideHoverLabel() {
     hoverLabel.classList.remove('visible');
   }
-  positions.forEach((p, i) => {
+  visiblePositions.forEach((p, i) => {
     const rect = buildingRectsGrp.children[i];
     if (!rect) return;
     rect.addEventListener('mouseenter', (e) => {
@@ -5189,16 +5545,21 @@ function renderMapTab(container) {
           if (areaId != null) el.style.display = mapAreaVisibility[areaId] !== false ? '' : 'none';
         }
       }
-      const buildingRectsGrp = document.getElementById('mapBuildingRects');
-      if (buildingRectsGrp && mapViewMode === 'production') {
-        for (let i = 0; i < buildingRectsGrp.children.length; i++) {
-          const el = buildingRectsGrp.children[i];
-          const areaIdStr = el.getAttribute('data-area-id');
-          const category = el.getAttribute('data-category');
-          const areaVisible = areaIdStr != null && mapAreaVisibility[areaIdStr] !== false;
-          const show = areaVisible && MAP_PRODUCTION_CATEGORIES.has(category);
-          el.style.display = show ? '' : 'none';
-        }
+      const bGrp = document.getElementById('mapBuildingRects');
+      if (bGrp) {
+        while (bGrp.firstChild) bGrp.removeChild(bGrp.firstChild);
+        positions.forEach(p => {
+          if (p.areaId == null || !MAP_PRODUCTION_CATEGORIES.has(p.category) || mapAreaVisibility[p.areaId] === false) return;
+          const m = worldToMapCoords(p.x, p.y);
+          const sz = Math.max(minSize, Math.min(maxSize, mapSizeForBuilding(p.name)));
+          const r = document.createElementNS(svgNs, 'rect');
+          r.setAttribute('x', m.x - sz / 2); r.setAttribute('y', m.y - sz / 2);
+          r.setAttribute('width', sz); r.setAttribute('height', sz);
+          r.setAttribute('fill', hashColor(p.name));
+          r.setAttribute('stroke', 'rgba(0,0,0,0.5)'); r.setAttribute('stroke-width', '0.5');
+          r.style.cursor = 'pointer';
+          bGrp.appendChild(r);
+        });
       }
     }
     searchInput.addEventListener('input', () => {
@@ -5280,168 +5641,59 @@ function renderMapTab(container) {
   legendHeader.appendChild(allBtn);
   legendHeader.appendChild(noneBtn);
   legend.appendChild(legendHeader);
-  if (transportConnections.length > 0) {
-    const droneCatDiv = document.createElement('div');
-    droneCatDiv.className = 'map-legend-cat map-legend-cat-collapsible collapsed';
-    const droneCatHead = document.createElement('div');
-    droneCatHead.className = 'map-legend-cat-head';
-    const droneChevron = document.createElement('span');
-    droneChevron.className = 'map-legend-cat-chevron';
-    droneChevron.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 10l5 5 5-5"/></svg>';
-    droneChevron.setAttribute('aria-label', 'Collapse section');
-    droneChevron.addEventListener('click', (e) => { e.stopPropagation(); droneCatDiv.classList.toggle('collapsed'); });
-    const droneCatTitle = document.createElement('span');
-    droneCatTitle.className = 'map-legend-cat-title';
-    droneCatTitle.textContent = 'Package transport (' + transportConnections.length + ' connections)';
-    droneCatHead.appendChild(droneChevron);
-    droneCatHead.appendChild(droneCatTitle);
-    droneCatDiv.appendChild(droneCatHead);
 
-    const droneCatBody = document.createElement('div');
-    droneCatBody.className = 'map-legend-cat-body';
-    const droneFilterLabel = document.createElement('div');
-    droneFilterLabel.className = 'map-legend-cat-title';
-    droneFilterLabel.style.marginTop = '0.35rem';
-    droneFilterLabel.style.marginBottom = '0.25rem';
-    droneFilterLabel.textContent = 'Filter by item:';
-    droneCatBody.appendChild(droneFilterLabel);
-
-    const dronePillsWrap = document.createElement('div');
-    dronePillsWrap.className = 'filter-pills';
-    dronePillsWrap.style.marginBottom = '0.5rem';
-
-    const allDronePill = document.createElement('button');
-    allDronePill.className = 'pill map-legend-drones-pill' + (mapDronesItemFilter === null ? ' active' : '');
-    allDronePill.dataset.item = 'all';
-    allDronePill.textContent = 'All';
-    allDronePill.addEventListener('click', () => {
-      mapDronesItemFilter = null;
-      setDroneLinesVisibility();
-      droneCatDiv.querySelectorAll('.map-legend-drones-pill').forEach(p => {
-        p.classList.toggle('active', p.dataset.item === 'all');
-      });
-    });
-    dronePillsWrap.appendChild(allDronePill);
-
-    const mapDroneItems = [...new Set(transportConnections.map(c => c.itemDisplayName))].filter(Boolean).sort();
-    mapDroneItems.forEach(itemName => {
-      const pill = document.createElement('button');
-      pill.className = 'pill map-legend-drones-pill' + (mapDronesItemFilter === itemName ? ' active' : '');
-      pill.dataset.item = itemName;
-      pill.innerHTML = `${itemIconHTML(itemName)}${esc(itemName)}`;
-      pill.style.fontSize = '0.75rem';
-      pill.addEventListener('click', () => {
-        mapDronesItemFilter = mapDronesItemFilter === itemName ? null : itemName;
-        setDroneLinesVisibility();
-        droneCatDiv.querySelectorAll('.map-legend-drones-pill').forEach(p => {
-          p.classList.toggle('active', (p.dataset.item === 'all' && mapDronesItemFilter === null) || p.dataset.item === mapDronesItemFilter);
-        });
-      });
-      dronePillsWrap.appendChild(pill);
-    });
-    droneCatBody.appendChild(dronePillsWrap);
-    droneCatDiv.appendChild(droneCatBody);
-    legend.appendChild(droneCatDiv);
-  }
-
-  if (droneCarriers.length > 0) {
-    const carrierCatDiv = document.createElement('div');
-    carrierCatDiv.className = 'map-legend-cat map-legend-cat-collapsible collapsed';
-    const carrierHead = document.createElement('div');
-    carrierHead.className = 'map-legend-cat-head';
-    carrierHead.style.cursor = 'pointer';
-    const carrierChevron = document.createElement('span');
-    carrierChevron.className = 'map-legend-cat-chevron';
-    carrierChevron.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 10l5 5 5-5"/></svg>';
-    carrierChevron.setAttribute('aria-label', 'Collapse section');
-    const carrierTitle = document.createElement('span');
-    carrierTitle.className = 'map-legend-cat-title';
-    carrierTitle.style.marginBottom = '0';
-    carrierTitle.textContent = 'Drones in transit (carrying item):';
-    carrierHead.appendChild(carrierChevron);
-    carrierHead.appendChild(carrierTitle);
-    carrierHead.addEventListener('click', () => carrierCatDiv.classList.toggle('collapsed'));
-    carrierCatDiv.appendChild(carrierHead);
-
-    const carrierBody = document.createElement('div');
-    carrierBody.className = 'map-legend-cat-body';
-    const carrierHint = document.createElement('div');
-    carrierHint.className = 'map-legend-cat-title';
-    carrierHint.style.fontSize = '0.7rem';
-    carrierHint.style.color = 'var(--gray-500)';
-    carrierHint.style.marginBottom = '0.35rem';
-    carrierHint.style.marginTop = '0.25rem';
-    carrierHint.textContent = 'Select item to show drones carrying it';
-    carrierBody.appendChild(carrierHint);
-    const carrierPillsWrap = document.createElement('div');
-    carrierPillsWrap.className = 'filter-pills';
-    carrierPillsWrap.style.marginBottom = '0.5rem';
-
-    function isCarrierPillActive(datasetItem) {
-      return (datasetItem === '' && mapDroneCarrierItemFilter === null) ||
-        (datasetItem === MAP_CARRIER_SHOW_ALL && mapDroneCarrierItemFilter === MAP_CARRIER_SHOW_ALL) ||
-        datasetItem === mapDroneCarrierItemFilter;
+  try {
+  if (railCircuits.length > 0) {
+    const rcCatDiv = document.createElement('div');
+    rcCatDiv.className = 'map-legend-cat map-legend-cat-collapsible collapsed';
+    const rcHead = document.createElement('div');
+    rcHead.className = 'map-legend-cat-head';
+    rcHead.style.cursor = 'pointer';
+    const rcChevron = document.createElement('span');
+    rcChevron.className = 'map-legend-cat-chevron';
+    rcChevron.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 10l5 5 5-5"/></svg>';
+    rcChevron.addEventListener('click', (e) => { e.stopPropagation(); rcCatDiv.classList.toggle('collapsed'); });
+    const overCount = railCircuits.reduce((s, c) => s + ((c.overloadedSegments || []).length > 0 ? 1 : 0), 0);
+    const rcTitle = document.createElement('span');
+    rcTitle.className = 'map-legend-cat-title';
+    rcTitle.style.marginBottom = '0';
+    rcTitle.innerHTML = 'Rail circuits (' + railCircuits.length + ')' + (overCount > 0 ? ' <span style="color:var(--red-400)">' + overCount + ' over</span>' : '');
+    rcHead.appendChild(rcChevron);
+    rcHead.appendChild(rcTitle);
+    rcHead.addEventListener('click', () => rcCatDiv.classList.toggle('collapsed'));
+    rcCatDiv.appendChild(rcHead);
+    const rcBody = document.createElement('div');
+    rcBody.className = 'map-legend-cat-body';
+    for (const circuit of railCircuits) {
+      const overloadedCount = (circuit.overloadedSegments || []).length;
+      const isOver = overloadedCount > 0;
+      const color = CIRCUIT_COLORS[circuit.id % CIRCUIT_COLORS.length];
+      const row = document.createElement('div');
+      row.className = 'map-legend-item';
+      row.style.fontSize = '0.7rem';
+      const dot = document.createElement('span');
+      dot.className = 'map-legend-dot';
+      dot.style.background = color;
+      const lbl = document.createElement('span');
+      lbl.style.color = isOver ? 'var(--red-300)' : 'var(--gray-400)';
+      lbl.textContent = 'Circuit ' + (circuit.id + 1) + ' (T' + circuit.minTier + ', ' + circuit.totalDemand + '/' + circuit.capacity + '/min' + (isOver ? ', ' + overloadedCount + ' seg over' : '') + ')';
+      row.appendChild(dot);
+      row.appendChild(lbl);
+      rcBody.appendChild(row);
     }
-
-    const carrierAllPill = document.createElement('button');
-    carrierAllPill.className = 'pill map-legend-carrier-pill' + (mapDroneCarrierItemFilter === MAP_CARRIER_SHOW_ALL ? ' active' : '');
-    carrierAllPill.dataset.item = MAP_CARRIER_SHOW_ALL;
-    carrierAllPill.textContent = 'All';
-    carrierAllPill.addEventListener('click', () => {
-      mapDroneCarrierItemFilter = MAP_CARRIER_SHOW_ALL;
-      setDroneCarrierMarkersVisibility();
-      carrierCatDiv.querySelectorAll('.map-legend-carrier-pill').forEach(p => {
-        p.classList.toggle('active', isCarrierPillActive(p.dataset.item));
-      });
-    });
-    carrierPillsWrap.appendChild(carrierAllPill);
-
-    const carrierNonePill = document.createElement('button');
-    carrierNonePill.className = 'pill map-legend-carrier-pill' + (mapDroneCarrierItemFilter === null ? ' active' : '');
-    carrierNonePill.dataset.item = '';
-    carrierNonePill.textContent = 'None';
-    carrierNonePill.addEventListener('click', () => {
-      mapDroneCarrierItemFilter = null;
-      setDroneCarrierMarkersVisibility();
-      carrierCatDiv.querySelectorAll('.map-legend-carrier-pill').forEach(p => {
-        p.classList.toggle('active', isCarrierPillActive(p.dataset.item));
-      });
-    });
-    carrierPillsWrap.appendChild(carrierNonePill);
-
-    const carrierItems = [...new Set(droneCarriers.map(d => d.itemDisplayName))].filter(Boolean).sort();
-    carrierItems.forEach(itemName => {
-      const pill = document.createElement('button');
-      pill.className = 'pill map-legend-carrier-pill' + (mapDroneCarrierItemFilter === itemName ? ' active' : '');
-      pill.dataset.item = itemName;
-      pill.innerHTML = `${itemIconHTML(itemName)}${esc(itemName)}`;
-      pill.style.fontSize = '0.75rem';
-      pill.addEventListener('click', () => {
-        mapDroneCarrierItemFilter = mapDroneCarrierItemFilter === itemName ? null : itemName;
-        setDroneCarrierMarkersVisibility();
-        carrierCatDiv.querySelectorAll('.map-legend-carrier-pill').forEach(p => {
-          p.classList.toggle('active', isCarrierPillActive(p.dataset.item));
-        });
-      });
-      carrierPillsWrap.appendChild(pill);
-    });
-    carrierBody.appendChild(carrierPillsWrap);
-    carrierCatDiv.appendChild(carrierBody);
-    legend.appendChild(carrierCatDiv);
+    rcCatDiv.appendChild(rcBody);
+    legend.appendChild(rcCatDiv);
   }
+  } catch (e) { console.error('Rail circuit legend error:', e); }
 
+  const MAP_HIDDEN_FILTER_CATEGORIES = new Set(['Rails', 'Junctions', 'Habitat Modules', 'Modular Components', 'Progression']);
   const byCategory = {};
   positions.forEach(p => {
+    if (MAP_HIDDEN_FILTER_CATEGORIES.has(p.category)) return;
     if (!byCategory[p.category]) byCategory[p.category] = [];
     byCategory[p.category].push(p);
   });
-  const catOrder = [...new Set(positions.map(p => p.category))].sort();
-  function updateCategoryCheckbox(catCheckbox, catDiv) {
-    const itemCheckboxes = catDiv.querySelectorAll('.map-legend-item-toggle input[type="checkbox"]');
-    const checked = [...itemCheckboxes].filter(cb => cb.checked).length;
-    catCheckbox.checked = checked === itemCheckboxes.length;
-    catCheckbox.indeterminate = checked > 0 && checked < itemCheckboxes.length;
-  }
+  const catOrder = [...new Set(positions.map(p => p.category).filter(cat => !MAP_HIDDEN_FILTER_CATEGORIES.has(cat)))].sort();
   catOrder.forEach(cat => {
     const catDiv = document.createElement('div');
     catDiv.className = 'map-legend-cat';
@@ -5456,9 +5708,7 @@ function renderMapTab(container) {
     catCheckbox.addEventListener('change', () => {
       const on = catCheckbox.checked;
       list.forEach(p => { mapBuildingVisibility[p.name] = on; });
-      catDiv.querySelectorAll('.map-legend-item-toggle input[type="checkbox"]').forEach(cb => { cb.checked = on; });
-      catCheckbox.indeterminate = false;
-      setRectVisibility(buildingRectsGrp, mapBuildingVisibility);
+      renderTabContent();
     });
     const catTitleText = document.createElement('span');
     catTitleText.textContent = cat;
@@ -5475,8 +5725,7 @@ function renderMapTab(container) {
       checkbox.checked = mapBuildingVisibility[name] !== false;
       checkbox.addEventListener('change', () => {
         mapBuildingVisibility[name] = checkbox.checked;
-        setRectVisibility(buildingRectsGrp, mapBuildingVisibility);
-        updateCategoryCheckbox(catCheckbox, catDiv);
+        renderTabContent();
       });
       const dot = document.createElement('span');
       dot.className = 'map-legend-dot';
@@ -5496,13 +5745,11 @@ function renderMapTab(container) {
   });
   allBtn.addEventListener('click', () => {
     positions.forEach(p => { mapBuildingVisibility[p.name] = true; });
-    legend.querySelectorAll('.map-legend-item-toggle input[type="checkbox"]').forEach(cb => { cb.checked = true; });
-    setRectVisibility(buildingRectsGrp, mapBuildingVisibility);
+    renderTabContent();
   });
   noneBtn.addEventListener('click', () => {
     positions.forEach(p => { mapBuildingVisibility[p.name] = false; });
-    legend.querySelectorAll('.map-legend-item-toggle input[type="checkbox"]').forEach(cb => { cb.checked = false; });
-    setRectVisibility(buildingRectsGrp, mapBuildingVisibility);
+    renderTabContent();
   });
   layout.appendChild(legend);
   }
@@ -5689,6 +5936,7 @@ function showAnalysis(data, filename) {
   analysisData = data;
   activeSaveName = filename;
   activeTab = 'buildings';
+  mapBuildingVisibility = {};
 
   $('#activeSaveLabel').textContent = '\u2014 ' + filename;
   $('#activeSaveLabel').classList.remove('hidden');
