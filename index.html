@@ -363,13 +363,15 @@
 
     /* ===== Map Tab ===== */
     .map-layout {
-      display: flex; gap: 1rem; flex-wrap: wrap;
-      align-items: stretch;
-      min-height: calc(100vh - 11rem);
+      display: flex; gap: 1rem; flex-wrap: nowrap;
+      align-items: flex-start;
       height: calc(100vh - 11rem);
     }
     .map-wrapper {
-      flex: 1; min-width: 300px; min-height: 0;
+      flex: 0 0 auto; min-width: 300px;
+      height: calc(100vh - 11rem);
+      width: calc(100vh - 11rem);
+      max-width: calc(100% - 240px);
       display: flex; flex-direction: column;
       background: var(--dark-800); border-radius: 0.5rem;
       overflow: hidden; position: relative;
@@ -381,7 +383,7 @@
     }
     .map-container:active { cursor: grabbing; }
     .map-container svg {
-      display: block; width: 100%; height: 100%; min-height: 300px;
+      display: block; width: 100%; height: 100%;
     }
     .map-legend {
       width: 220px; flex-shrink: 0;
@@ -6133,13 +6135,14 @@ function renderMapTab(container) {
     });
     legend.appendChild(catDiv);
   });
+  const legendPositions = positions.filter(p => !MAP_HIDDEN_FILTER_CATEGORIES.has(p.category));
   allBtn.addEventListener('click', () => {
-    positions.forEach(p => { mapBuildingVisibility[p.name] = true; });
+    legendPositions.forEach(p => { mapBuildingVisibility[p.name] = true; });
     updateBuildingRectVisibility();
     legend.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = true; cb.indeterminate = false; });
   });
   noneBtn.addEventListener('click', () => {
-    positions.forEach(p => { mapBuildingVisibility[p.name] = false; });
+    legendPositions.forEach(p => { mapBuildingVisibility[p.name] = false; });
     updateBuildingRectVisibility();
     legend.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = false; cb.indeterminate = false; });
   });
