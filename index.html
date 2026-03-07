@@ -5522,6 +5522,15 @@ function renderMapTab(container) {
   railsGrp.style.display = mapViewMode === 'production' ? 'none' : '';
   g.appendChild(railsGrp);
 
+  function updateRailCircuitVisibility() {
+    const grp = document.getElementById('mapRailCircuits');
+    if (!grp) return;
+    for (const line of grp.children) {
+      const cid = parseInt(line.getAttribute('data-circuit'), 10);
+      line.style.display = mapCircuitVisibility[cid] === false ? 'none' : '';
+    }
+  }
+
   const buildingRectsGrp = document.createElementNS(svgNs, 'g');
   buildingRectsGrp.id = 'mapBuildingRects';
   buildingRectsGrp.style.display = '';
@@ -5540,13 +5549,13 @@ function renderMapTab(container) {
   const mapSpan = Math.min(vbW, vbH);
   const minSize = 2;
   const maxSize = mapSpan * 0.015;
+  const allBuildingPositions = positions;
   const visiblePositions = [];
   positions.forEach(p => {
     const isVisible = mapViewMode === 'production'
       ? (p.areaId != null && MAP_PRODUCTION_CATEGORIES.has(p.category) && mapAreaVisibility[p.areaId] !== false)
       : (mapBuildingVisibility[p.name] !== false);
-    if (!isVisible) return;
-    visiblePositions.push(p);
+    if (isVisible) visiblePositions.push(p);
     const m = worldToMapCoords(p.x, p.y);
     const size = Math.max(minSize, Math.min(maxSize, mapSizeForBuilding(p.name)));
     const rect = document.createElementNS(svgNs, 'rect');
@@ -5562,9 +5571,19 @@ function renderMapTab(container) {
     if (p.areaId != null) rect.setAttribute('data-area-id', String(p.areaId));
     if (p.entityId != null) rect.setAttribute('data-entity-id', String(p.entityId));
     rect.style.cursor = 'pointer';
+    if (!isVisible) rect.style.display = 'none';
     buildingRectsGrp.appendChild(rect);
   });
   g.appendChild(buildingRectsGrp);
+
+  function updateBuildingRectVisibility() {
+    const grp = document.getElementById('mapBuildingRects');
+    if (!grp) return;
+    for (const rect of grp.children) {
+      const name = rect.getAttribute('data-name');
+      rect.style.display = mapBuildingVisibility[name] === false ? 'none' : '';
+    }
+  }
 
   function normalizeEntityIdForPath(id) {
     if (id == null) return '';
@@ -5691,7 +5710,7 @@ function renderMapTab(container) {
   function hideHoverLabel() {
     hoverLabel.classList.remove('visible');
   }
-  visiblePositions.forEach((p, i) => {
+  allBuildingPositions.forEach((p, i) => {
     const rect = buildingRectsGrp.children[i];
     if (!rect) return;
     rect.addEventListener('mouseenter', (e) => {
@@ -5968,7 +5987,8 @@ function renderMapTab(container) {
       e.stopPropagation();
       const on = rcCatCheckbox.checked;
       railCircuits.forEach(c => { mapCircuitVisibility[c.id] = on; });
-      renderTabContent();
+      updateRailCircuitVisibility();
+      rcBody.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = on; });
     });
     rcCatCheckbox.addEventListener('click', (e) => e.stopPropagation());
     const overCount = railCircuits.reduce((s, c) => s + ((c.overloadedSegments || []).length > 0 ? 1 : 0), 0);
@@ -5999,7 +6019,9 @@ function renderMapTab(container) {
       checkbox.addEventListener('change', (e) => {
         e.stopPropagation();
         mapCircuitVisibility[circuit.id] = checkbox.checked;
-        renderTabContent();
+        updateRailCircuitVisibility();
+        rcCatCheckbox.checked = railCircuits.every(c => mapCircuitVisibility[c.id] !== false);
+        rcCatCheckbox.indeterminate = railCircuits.some(c => mapCircuitVisibility[c.id] !== false) && !rcCatCheckbox.checked;
       });
       checkbox.addEventListener('click', (e) => e.stopPropagation());
       const dot = document.createElement('span');
@@ -6073,7 +6095,8 @@ function renderMapTab(container) {
     catCheckbox.addEventListener('change', () => {
       const on = catCheckbox.checked;
       list.forEach(p => { mapBuildingVisibility[p.name] = on; });
-      renderTabContent();
+      updateBuildingRectVisibility();
+      catDiv.querySelectorAll('.map-legend-item input[type="checkbox"]').forEach(cb => { cb.checked = on; });
     });
     const catTitleText = document.createElement('span');
     catTitleText.textContent = cat;
@@ -6090,7 +6113,9 @@ function renderMapTab(container) {
       checkbox.checked = mapBuildingVisibility[name] !== false;
       checkbox.addEventListener('change', () => {
         mapBuildingVisibility[name] = checkbox.checked;
-        renderTabContent();
+        updateBuildingRectVisibility();
+        catCheckbox.checked = names.every(n => mapBuildingVisibility[n] !== false);
+        catCheckbox.indeterminate = names.some(n => mapBuildingVisibility[n] !== false) && !catCheckbox.checked;
       });
       const dot = document.createElement('span');
       dot.className = 'map-legend-dot';
@@ -6110,11 +6135,13 @@ function renderMapTab(container) {
   });
   allBtn.addEventListener('click', () => {
     positions.forEach(p => { mapBuildingVisibility[p.name] = true; });
-    renderTabContent();
+    updateBuildingRectVisibility();
+    legend.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = true; cb.indeterminate = false; });
   });
   noneBtn.addEventListener('click', () => {
     positions.forEach(p => { mapBuildingVisibility[p.name] = false; });
-    renderTabContent();
+    updateBuildingRectVisibility();
+    legend.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = false; cb.indeterminate = false; });
   });
   layout.appendChild(legend);
   }
