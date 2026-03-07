@@ -3568,6 +3568,7 @@ function analyze(jsonContent) {
 
   // ===== Rail circuit analysis =====
   let railCircuits = [];
+  let buildingRailPortCounts = new Map();
   try {
   const RAIL_TIER_CAPACITY = { 1: 120, 2: 240, 3: 480 };
   const RAIL_PATH_PREFIX = '/Game/Chimera/Buildings/DroneConnections/DroneRail/DA_DroneRailT';
@@ -3846,25 +3847,59 @@ function analyze(jsonContent) {
     });
   }
 
-  // Connected components for grouping/display only
-  const ufParent = new Map();
-  function ufFind(x) {
-    if (!ufParent.has(x)) ufParent.set(x, x);
-    let root = x;
-    while (ufParent.get(root) !== root) root = ufParent.get(root);
-    while (ufParent.get(x) !== root) { const next = ufParent.get(x); ufParent.set(x, root); x = next; }
+  // Circuit grouping: merge segments that share any non-building endpoint node.
+  // Buildings are circuit boundaries — segments never merge through a building node.
+  // Exclude "Rails" category (Drone Rail Support, Drone Invisible Pole, etc.) — these are
+  // functionally junctions/connection points, not production buildings.
+  const buildingNodeIds = new Set(
+    (buildingPositions || []).filter(p => p.category !== 'Rails')
+      .map(p => String(p.entityId || '').replace(/^\(ID=|\)$/g, '')).filter(id => !junctionNodeIds.has(id))
+  );
+  const segUf = new Map();
+  function segFind(i) {
+    if (!segUf.has(i)) segUf.set(i, i);
+    let root = i;
+    while (segUf.get(root) !== root) root = segUf.get(root);
+    while (segUf.get(i) !== root) { const next = segUf.get(i); segUf.set(i, root); i = next; }
     return root;
   }
-  function ufUnion(a, b) { ufParent.set(ufFind(a), ufFind(b)); }
-  for (const r of railSegments) ufUnion(r.startId, r.endId);
+  function segUnion(a, b) { segUf.set(segFind(a), segFind(b)); }
+  const segmentsByNode = new Map();
+  for (let i = 0; i < railSegments.length; i++) {
+    const r = railSegments[i];
+    for (const nid of [r.startId, r.endId]) {
+      if (!segmentsByNode.has(nid)) segmentsByNode.set(nid, []);
+      segmentsByNode.get(nid).push(i);
+    }
+  }
+  for (const [nodeId, segs] of segmentsByNode) {
+    if (segs.length < 2) continue;
+    if (buildingNodeIds.has(nodeId)) continue;
+    for (let k = 1; k < segs.length; k++) segUnion(segs[0], segs[k]);
+  }
+
+  // Per-building rail port counts (for tooltip): segments where building is End = inputs, Start = outputs.
+  const segmentsByBuildingOut = new Map();
+  const segmentsByBuildingIn = new Map();
+  for (let i = 0; i < railSegments.length; i++) {
+    const r = railSegments[i];
+    if (buildingNodeIds.has(r.startId)) {
+      if (!segmentsByBuildingOut.has(r.startId)) segmentsByBuildingOut.set(r.startId, []);
+      segmentsByBuildingOut.get(r.startId).push(i);
+    }
+    if (buildingNodeIds.has(r.endId)) {
+      if (!segmentsByBuildingIn.has(r.endId)) segmentsByBuildingIn.set(r.endId, []);
+      segmentsByBuildingIn.get(r.endId).push(i);
+    }
+  }
 
   const componentMap = new Map();
   for (let i = 0; i < railSegments.length; i++) {
-    const r = railSegments[i];
-    const rootId = ufFind(r.startId);
-    if (!componentMap.has(rootId)) componentMap.set(rootId, { railIndices: [], nodeIds: new Set() });
-    const comp = componentMap.get(rootId);
+    const root = segFind(i);
+    if (!componentMap.has(root)) componentMap.set(root, { railIndices: [], nodeIds: new Set() });
+    const comp = componentMap.get(root);
     comp.railIndices.push(i);
+    const r = railSegments[i];
     comp.nodeIds.add(r.startId);
     comp.nodeIds.add(r.endId);
   }
@@ -3904,6 +3939,15 @@ function analyze(jsonContent) {
     });
   }
   railCircuits.sort((a, b) => (b.overloadedSegments.length - a.overloadedSegments.length) || (b.totalDemand - a.totalDemand));
+
+  // Per-building rail port counts: inputs = segments where building is End, outputs = segments where building is Start.
+  const allBuildingNodeIds = new Set([...(segmentsByBuildingIn?.keys() ?? []), ...(segmentsByBuildingOut?.keys() ?? [])]);
+  for (const nid of allBuildingNodeIds) {
+    buildingRailPortCounts.set(nid, {
+      inputs: segmentsByBuildingIn?.get(nid)?.length ?? 0,
+      outputs: segmentsByBuildingOut?.get(nid)?.length ?? 0
+    });
+  }
   } catch (e) { console.error('Rail circuit analysis error:', e); railCircuits = []; }
 
   return {
@@ -3911,6 +3955,7 @@ function analyze(jsonContent) {
     inventory: inventoryArr,
     buildingPositions, transportConnections, droneCarriers, productionByArea,
     shortfalls, railCircuits,
+    buildingRailPortCounts,
     totals: { buildings: totalBuildings, productionItems: productionArr.length, storedItems: totalStoredItems, inventoryItems: totalInventoryItems, shortfalls: shortfalls.length }
   };
 }
@@ -5597,12 +5642,14 @@ function renderMapTab(container) {
 
   const hoverLabel = document.createElement('div');
   hoverLabel.className = 'map-hover-label';
-  hoverLabel.innerHTML = '<span class="map-hover-label-name"></span><div class="map-hover-label-cat"></div><div class="map-hover-label-produces"></div>';
+  hoverLabel.innerHTML = '<span class="map-hover-label-name"></span><div class="map-hover-label-cat"></div><div class="map-hover-label-produces"></div><div class="map-hover-label-rail"></div>';
   const hoverLabelName = hoverLabel.querySelector('.map-hover-label-name');
   const hoverLabelCat = hoverLabel.querySelector('.map-hover-label-cat');
   const hoverLabelProduces = hoverLabel.querySelector('.map-hover-label-produces');
+  const hoverLabelRail = hoverLabel.querySelector('.map-hover-label-rail');
   const labelOffset = 12;
-  function showHoverLabel(name, category, clientX, clientY, displayName, producedItem, producedPerMinute) {
+  const railPortCounts = analysisData.buildingRailPortCounts || new Map();
+  function showHoverLabel(name, category, clientX, clientY, displayName, producedItem, producedPerMinute, railPorts) {
     // Line 1: always show building type (name)
     hoverLabelName.textContent = name;
     // Line 2: category; if user set a custom name, show it here too
@@ -5617,6 +5664,15 @@ function renderMapTab(container) {
       hoverLabelProduces.style.display = '';
     } else {
       hoverLabelProduces.style.display = 'none';
+    }
+    if (railPorts && (railPorts.inputs > 0 || railPorts.outputs > 0)) {
+      const parts = [];
+      if (railPorts.inputs > 0) parts.push(railPorts.inputs + ' in');
+      if (railPorts.outputs > 0) parts.push(railPorts.outputs + ' out');
+      hoverLabelRail.textContent = 'Rail: ' + parts.join(', ');
+      hoverLabelRail.style.display = '';
+    } else {
+      hoverLabelRail.style.display = 'none';
     }
     hoverLabel.classList.add('visible');
     positionHoverLabel(clientX, clientY);
@@ -5639,7 +5695,9 @@ function renderMapTab(container) {
     const rect = buildingRectsGrp.children[i];
     if (!rect) return;
     rect.addEventListener('mouseenter', (e) => {
-      showHoverLabel(p.name, p.category, e.clientX, e.clientY, p.displayName, p.producedItem, p.producedPerMinute);
+      const nid = normalizeEntityIdForPath(p.entityId);
+      const railPorts = nid ? railPortCounts.get(nid) : null;
+      showHoverLabel(p.name, p.category, e.clientX, e.clientY, p.displayName, p.producedItem, p.producedPerMinute, railPorts);
     });
     rect.addEventListener('mousemove', (e) => {
       positionHoverLabel(e.clientX, e.clientY);
