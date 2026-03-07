@@ -1363,6 +1363,19 @@ let inventorySearch = '';
 let inventorySortField = 'name';
 let inventorySortDir = 'asc';
 
+let shortfallSortField = 'name';
+let shortfallSortDir = 'asc';
+let dronesSortField = 'senderName';
+let dronesSortDir = 'asc';
+let buildingsSortField = 'name';
+let buildingsSortDir = 'asc';
+let mapProductionAreaSortField = 'name';
+let mapProductionAreaSortDir = 'asc';
+let jsonSearchSortField = 'path';
+let jsonSearchSortDir = 'asc';
+let jsonParentSortField = 'path';
+let jsonParentSortDir = 'asc';
+
 let dronesItemFilter = null;
 let railCircuitExpanded = new Set();
 
@@ -4173,8 +4186,27 @@ function renderBuildingsTab(container) {
     if (!isCollapsed) {
       const body = h('div', { className: 'cat-body' });
       const table = document.createElement('table');
+      const sortedBuildings = [...cat.buildings].sort((a, b) => {
+        let cmp = buildingsSortField === 'name' ? a.name.localeCompare(b.name) : (a.count - b.count);
+        return buildingsSortDir === 'asc' ? cmp : -cmp;
+      });
+      const thead = document.createElement('thead');
+      const headerRow = document.createElement('tr');
+      headerRow.innerHTML = `
+        <th class="left" data-field="name">Building ${sortIconHTML('name', buildingsSortField, buildingsSortDir)}</th>
+        <th class="right" data-field="count">Count ${sortIconHTML('count', buildingsSortField, buildingsSortDir)}</th>`;
+      headerRow.querySelectorAll('th').forEach(th => {
+        th.addEventListener('click', () => {
+          const field = th.dataset.field;
+          if (buildingsSortField === field) buildingsSortDir = buildingsSortDir === 'asc' ? 'desc' : 'asc';
+          else { buildingsSortField = field; buildingsSortDir = field === 'count' ? 'desc' : 'asc'; }
+          renderTabContent();
+        });
+      });
+      thead.appendChild(headerRow);
+      table.appendChild(thead);
       const tbody = document.createElement('tbody');
-      for (const b of cat.buildings) {
+      for (const b of sortedBuildings) {
         const tr = document.createElement('tr');
         tr.innerHTML = `<td class="left indent" style="color:var(--gray-200)"><span class="name-with-icon">${buildingIconHTML(b.name, 'small')}${esc(b.name)}</span></td>
           <td class="right mono" style="color:var(--gray-300)">${b.count.toLocaleString()}</td>`;
@@ -4315,18 +4347,42 @@ function renderShortfallsTab(container) {
   const storageByItem = new Map();
   (analysisData.storage || []).forEach(s => { storageByItem.set(s.name, (storageByItem.get(s.name) || 0) + s.count); });
 
+  const sortedShortfalls = [...shortfalls].sort((a, b) => {
+    let cmp = 0;
+    if (shortfallSortField === 'name') cmp = (a.name || '').localeCompare(b.name || '');
+    else if (shortfallSortField === 'stored') cmp = (storageByItem.get(a.name) || 0) - (storageByItem.get(b.name) || 0);
+    else if (shortfallSortField === 'produced') cmp = (a.produced || 0) - (b.produced || 0);
+    else if (shortfallSortField === 'consumed') cmp = (a.consumed || 0) - (b.consumed || 0);
+    else if (shortfallSortField === 'surplus') cmp = (-(a.shortfall || 0)) - (-(b.shortfall || 0));
+    else if (shortfallSortField === 'shortfall') cmp = (a.shortfall || 0) - (b.shortfall || 0);
+    else if (shortfallSortField === 'untilEmpty') {
+      const minA = (a.consumed || 0) > 0 ? (storageByItem.get(a.name) || 0) / a.consumed : Infinity;
+      const minB = (b.consumed || 0) > 0 ? (storageByItem.get(b.name) || 0) / b.consumed : Infinity;
+      cmp = minA - minB;
+    }
+    return shortfallSortDir === 'asc' ? cmp : -cmp;
+  });
+
   const panel = h('div', { className: 'panel' });
   const table = document.createElement('table');
   const thead = document.createElement('thead');
-  thead.innerHTML = `
-    <tr>
-      <th class="left">Item</th>
-      <th class="right">Stored</th>
-      <th class="right">Until empty</th>
-      <th class="right">Produced /min</th>
-      <th class="right">Consumed /min</th>
-      <th class="right">Surplus /min</th>
-    </tr>`;
+  const headerRow = document.createElement('tr');
+  headerRow.innerHTML = `
+    <th class="left" data-field="name">Item ${sortIconHTML('name', shortfallSortField, shortfallSortDir)}</th>
+    <th class="right" data-field="stored">Stored ${sortIconHTML('stored', shortfallSortField, shortfallSortDir)}</th>
+    <th class="right" data-field="untilEmpty">Until empty ${sortIconHTML('untilEmpty', shortfallSortField, shortfallSortDir)}</th>
+    <th class="right" data-field="produced">Produced /min ${sortIconHTML('produced', shortfallSortField, shortfallSortDir)}</th>
+    <th class="right" data-field="consumed">Consumed /min ${sortIconHTML('consumed', shortfallSortField, shortfallSortDir)}</th>
+    <th class="right" data-field="surplus">Surplus /min ${sortIconHTML('surplus', shortfallSortField, shortfallSortDir)}</th>`;
+  headerRow.querySelectorAll('th').forEach(th => {
+    th.addEventListener('click', () => {
+      const field = th.dataset.field;
+      if (shortfallSortField === field) shortfallSortDir = shortfallSortDir === 'asc' ? 'desc' : 'asc';
+      else { shortfallSortField = field; shortfallSortDir = (field === 'name' || field === 'untilEmpty') ? 'asc' : 'desc'; }
+      renderTabContent();
+    });
+  });
+  thead.appendChild(headerRow);
   table.appendChild(thead);
 
   const tbody = document.createElement('tbody');
@@ -4336,7 +4392,7 @@ function renderShortfallsTab(container) {
     tr.innerHTML = '<td colspan="6" class="empty-msg" style="text-align:center;padding:2rem;color:var(--gray-500)">No demand data. Recipe inputs are used to compute consumption; add more buildings with recipes to see shortfalls.</td>';
     tbody.appendChild(tr);
   } else {
-    for (const row of shortfalls) {
+    for (const row of sortedShortfalls) {
       const stored = storageByItem.get(row.name) || 0;
       const consumedPerMin = row.consumed || 0;
       let untilEmpty = '—';
@@ -4715,13 +4771,28 @@ function renderJsonEditorTab(container) {
           resultsDiv.innerHTML = '<p style="color:var(--gray-500);margin:0">No matching parent paths. Try a different search.</p>';
           return;
         }
+        const sortedPaths = [...parentPaths].sort((a, b) => {
+          const cmp = (a || '').localeCompare(b || '');
+          return jsonParentSortDir === 'asc' ? cmp : -cmp;
+        });
         const table = document.createElement('table');
         table.style.width = '100%';
         table.style.fontSize = '0.875rem';
         table.style.tableLayout = 'fixed';
-        table.innerHTML = '<thead><tr><th class="left" style="width:5rem;min-width:5rem;padding:0.5rem 0.75rem;color:var(--gray-500)"></th><th class="left" style="padding:0.5rem 0.75rem;color:var(--gray-500)">Parent path (click Load to see children)</th></tr></thead><tbody></tbody>';
-        const tbody = table.querySelector('tbody');
-        parentPaths.forEach(parentPath => {
+        const thead = document.createElement('thead');
+        const headerRow = document.createElement('tr');
+        headerRow.innerHTML = `<th class="left" style="width:5rem;min-width:5rem;padding:0.5rem 0.75rem;color:var(--gray-500)"></th><th class="left" data-field="path" style="padding:0.5rem 0.75rem;color:var(--gray-500);cursor:pointer">Parent path (click Load to see children) ${sortIconHTML('path', jsonParentSortField, jsonParentSortDir)}</th>`;
+        headerRow.querySelectorAll('th[data-field]').forEach(th => {
+          th.addEventListener('click', () => {
+            if (jsonParentSortField === 'path') jsonParentSortDir = jsonParentSortDir === 'asc' ? 'desc' : 'asc';
+            else { jsonParentSortField = 'path'; jsonParentSortDir = 'asc'; }
+            renderParentList(lastParentPaths);
+          });
+        });
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+        const tbody = document.createElement('tbody');
+        sortedPaths.forEach(parentPath => {
           const tr = document.createElement('tr');
           tr.style.borderTop = '1px solid var(--dark-600)';
           const loadCell = document.createElement('td');
@@ -4743,6 +4814,7 @@ function renderJsonEditorTab(container) {
           tr.appendChild(pathCell);
           tbody.appendChild(tr);
         });
+        table.appendChild(tbody);
         resultsDiv.innerHTML = '';
         resultsDiv.appendChild(table);
         if (parentPaths.length >= MAX_JSON_SEARCH_RESULTS) {
@@ -4778,13 +4850,31 @@ function renderJsonEditorTab(container) {
           resultsDiv.innerHTML = '<p style="color:var(--gray-500);margin:0">No paths under this parent.</p>';
           return;
         }
+        const sortedRows = [...rows].sort((a, b) => {
+          let cmp = 0;
+          if (jsonSearchSortField === 'path') cmp = (a.path || '').localeCompare(b.path || '');
+          else cmp = String(a.value ?? '').localeCompare(String(b.value ?? ''));
+          return jsonSearchSortDir === 'asc' ? cmp : -cmp;
+        });
         const table = document.createElement('table');
         table.style.width = '100%';
         table.style.fontSize = '0.875rem';
         table.style.tableLayout = 'fixed';
-        table.innerHTML = '<thead><tr><th class="left" style="width:38%;padding:0.5rem 0.75rem;color:var(--gray-500)">Path</th><th class="left" style="width:62%;padding:0.5rem 0.75rem;color:var(--gray-500)">Value</th></tr></thead><tbody></tbody>';
-        const tbody = table.querySelector('tbody');
-        rows.forEach(r => {
+        const thead = document.createElement('thead');
+        const headerRow = document.createElement('tr');
+        headerRow.innerHTML = `<th class="left" data-field="path" style="width:38%;padding:0.5rem 0.75rem;color:var(--gray-500);cursor:pointer">Path ${sortIconHTML('path', jsonSearchSortField, jsonSearchSortDir)}</th><th class="left" data-field="value" style="width:62%;padding:0.5rem 0.75rem;color:var(--gray-500);cursor:pointer">Value ${sortIconHTML('value', jsonSearchSortField, jsonSearchSortDir)}</th>`;
+        headerRow.querySelectorAll('th[data-field]').forEach(th => {
+          th.addEventListener('click', () => {
+            const field = th.dataset.field;
+            if (jsonSearchSortField === field) jsonSearchSortDir = jsonSearchSortDir === 'asc' ? 'desc' : 'asc';
+            else { jsonSearchSortField = field; jsonSearchSortDir = 'asc'; }
+            renderResults(rows);
+          });
+        });
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+        const tbody = document.createElement('tbody');
+        sortedRows.forEach(r => {
           const tr = document.createElement('tr');
           tr.style.borderTop = '1px solid var(--dark-600)';
           const pathCell = document.createElement('td');
@@ -4820,6 +4910,7 @@ function renderJsonEditorTab(container) {
           tr.appendChild(valueCell);
           tbody.appendChild(tr);
         });
+        table.appendChild(tbody);
         resultsDiv.innerHTML = '';
         resultsDiv.appendChild(table);
       }
@@ -5189,6 +5280,14 @@ function renderDronesTab(container) {
   if (dronesItemFilter != null && dronesItemFilter !== '') {
     filtered = connections.filter(c => c.itemDisplayName === dronesItemFilter);
   }
+  filtered = [...filtered].sort((a, b) => {
+    let cmp = 0;
+    if (dronesSortField === 'senderName') cmp = (a.senderName || '').localeCompare(b.senderName || '');
+    else if (dronesSortField === 'receiverName') cmp = (a.receiverName || '').localeCompare(b.receiverName || '');
+    else if (dronesSortField === 'itemDisplayName') cmp = (a.itemDisplayName || '').localeCompare(b.itemDisplayName || '');
+    else if (dronesSortField === 'requestedAmount') cmp = (a.requestedAmount || 0) - (b.requestedAmount || 0);
+    return dronesSortDir === 'asc' ? cmp : -cmp;
+  });
 
   const toolbar = h('div', { className: 'toolbar' },
     h('div', { className: 'toolbar-stats' },
@@ -5222,10 +5321,18 @@ function renderDronesTab(container) {
   const thead = document.createElement('thead');
   const headerRow = document.createElement('tr');
   headerRow.innerHTML = `
-    <th class="left">Sender</th>
-    <th class="left">Receiver</th>
-    <th class="left">Item</th>
-    <th class="right">Requested</th>`;
+    <th class="left" data-field="senderName">Sender ${sortIconHTML('senderName', dronesSortField, dronesSortDir)}</th>
+    <th class="left" data-field="receiverName">Receiver ${sortIconHTML('receiverName', dronesSortField, dronesSortDir)}</th>
+    <th class="left" data-field="itemDisplayName">Item ${sortIconHTML('itemDisplayName', dronesSortField, dronesSortDir)}</th>
+    <th class="right" data-field="requestedAmount">Requested ${sortIconHTML('requestedAmount', dronesSortField, dronesSortDir)}</th>`;
+  headerRow.querySelectorAll('th').forEach(th => {
+    th.addEventListener('click', () => {
+      const field = th.dataset.field;
+      if (dronesSortField === field) dronesSortDir = dronesSortDir === 'asc' ? 'desc' : 'asc';
+      else { dronesSortField = field; dronesSortDir = field === 'requestedAmount' ? 'desc' : 'asc'; }
+      renderTabContent();
+    });
+  });
   thead.appendChild(headerRow);
   table.appendChild(thead);
 
@@ -5716,14 +5823,34 @@ function renderMapTab(container) {
       areaTotal.textContent = area.totalPerMinute.toFixed(1) + ' items/min total';
       areaBody.appendChild(areaTotal);
       if (area.items.length > 0) {
+        const sortedItems = [...area.items].sort((a, b) => {
+          let cmp = 0;
+          if (mapProductionAreaSortField === 'name') cmp = (a.name || '').localeCompare(b.name || '');
+          else if (mapProductionAreaSortField === 'produced') cmp = (a.produced || 0) - (b.produced || 0);
+          else if (mapProductionAreaSortField === 'sent') cmp = (a.sent || 0) - (b.sent || 0);
+          return mapProductionAreaSortDir === 'asc' ? cmp : -cmp;
+        });
         const table = document.createElement('table');
         table.className = 'map-production-area-table';
         const thead = document.createElement('thead');
-        thead.innerHTML = '<tr><th class="left">Item</th><th class="right">Produced</th><th class="right">Sent</th></tr>';
+        const headerRow = document.createElement('tr');
+        headerRow.innerHTML = `
+          <th class="left" data-field="name">Item ${sortIconHTML('name', mapProductionAreaSortField, mapProductionAreaSortDir)}</th>
+          <th class="right" data-field="produced">Produced ${sortIconHTML('produced', mapProductionAreaSortField, mapProductionAreaSortDir)}</th>
+          <th class="right" data-field="sent">Sent ${sortIconHTML('sent', mapProductionAreaSortField, mapProductionAreaSortDir)}</th>`;
+        headerRow.querySelectorAll('th').forEach(th => {
+          th.addEventListener('click', () => {
+            const field = th.dataset.field;
+            if (mapProductionAreaSortField === field) mapProductionAreaSortDir = mapProductionAreaSortDir === 'asc' ? 'desc' : 'asc';
+            else { mapProductionAreaSortField = field; mapProductionAreaSortDir = (field === 'name') ? 'asc' : 'desc'; }
+            renderTabContent();
+          });
+        });
+        thead.appendChild(headerRow);
         table.appendChild(thead);
         const tbody = document.createElement('tbody');
         tbody.className = 'divide';
-        area.items.forEach(({ name, produced, sent }) => {
+        sortedItems.forEach(({ name, produced, sent }) => {
           const tr = document.createElement('tr');
           const sentClass = sent > 0 ? ' right rate-deficit' : ' right';
           tr.innerHTML = `<td class="left">${itemIconHTML(name)} ${esc(name)}</td><td class="right">${produced.toFixed(2)}</td><td class="${sentClass}">${sent > 0 ? sent.toFixed(2) : '—'}</td>`;
