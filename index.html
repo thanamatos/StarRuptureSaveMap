@@ -412,6 +412,17 @@
       align-items: center;
       gap: 0.25rem;
     }
+    .map-legend-cat-head input[type="checkbox"],
+    .map-legend-cat-toggle input[type="checkbox"],
+    .map-legend-item-toggle input[type="checkbox"] {
+      flex-shrink: 0;
+      width: 1rem;
+      height: 1rem;
+      min-width: 1rem;
+      min-height: 1rem;
+      cursor: pointer;
+      accent-color: var(--accent-blue);
+    }
     .map-legend-cat-chevron {
       flex-shrink: 0;
       width: 1rem;
@@ -434,9 +445,6 @@
       display: flex; align-items: center; gap: 0.5rem;
       cursor: pointer; padding: 0.125rem 0;
     }
-    .map-legend-cat-toggle input[type="checkbox"] {
-      flex-shrink: 0; cursor: pointer; accent-color: var(--accent-blue);
-    }
     .map-legend-item {
       display: flex; align-items: center; gap: 0.5rem;
       font-size: 0.75rem; color: var(--gray-400);
@@ -444,9 +452,6 @@
     }
     .map-legend-item-toggle {
       cursor: pointer;
-    }
-    .map-legend-item-toggle input[type="checkbox"] {
-      flex-shrink: 0; cursor: pointer; accent-color: var(--accent-blue);
     }
     .map-legend-dot {
       width: 10px; height: 10px; border-radius: 50%;
@@ -1367,9 +1372,11 @@ let mapTranslateY = 0;
 let mapDragStart = null;
 const MAP_DEFAULT_VISIBLE_CATEGORIES = new Set(['Crafting', 'Ore Processing', 'Extraction']);
 let mapBuildingVisibility = {};
+let mapCircuitVisibility = {}; // circuit id -> true/false; default true when undefined
 let mapViewMode = 'buildings'; // 'buildings' | 'production'
 let mapAreaVisibility = {}; // area id -> true/false; default true when undefined
 let mapHighlightedAreaId = null; // area id highlighted in legend when clicking area on map
+let mapHighlightedPathRailIndices = null; // Set of global rail segment indices for path from selected building (drone path)
 let productionAreaSearch = ''; // filter production legend to areas producing this item
 
 // StarRuptureMap-style world-to-SVG transform (from StarRuptureMap main.go)
@@ -1399,6 +1406,7 @@ function packageSenderRate(itemsPerMinRail, requestedAmount) {
   const cycleSec = (requestedAmount * 60) / itemsPerMinRail + PACKAGE_SEND_DURATION_SEC;
   return (requestedAmount * 60) / cycleSec;
 }
+const RAIL_DEMAND_TOOLTIP = 'Demand = sum of effective request rates (items/min). Per request: rate = (stack × 60) ÷ (fill time + 10s send). Fill time = (stack × 60) ÷ rail capacity.';
 
 function worldToMapCoords(worldX, worldY) {
   return {
@@ -3565,11 +3573,9 @@ function analyze(jsonContent) {
     if (p.entityId != null) entityIdToName.set(String(p.entityId).replace(/^\(ID=|\)$/g, ''), (p.displayName && p.displayName.trim()) ? p.displayName.trim() : p.name);
   }
 
-  function addGraphEdge(a, b, railIdx, weight) {
-    if (!graph.has(a)) graph.set(a, []);
-    if (!graph.has(b)) graph.set(b, []);
-    graph.get(a).push({ to: b, railIdx, weight });
-    graph.get(b).push({ to: a, railIdx, weight });
+  function addDirectedEdge(from, to, railIdx, weight) {
+    if (!graph.has(from)) graph.set(from, []);
+    graph.get(from).push({ to, railIdx, weight });
   }
   function addAttachment(entityId, nodeId, railIdx) {
     if (!attachmentsByEntity.has(entityId)) attachmentsByEntity.set(entityId, []);
@@ -3619,7 +3625,6 @@ function analyze(jsonContent) {
         };
         const railIdx = railSegments.length;
         railSegments.push(rail);
-        addGraphEdge(startId, endId, railIdx, rail.length || 1);
         if (startPos) nodePos.set(startId, startPos);
         if (endPos) nodePos.set(endId, endPos);
       }
@@ -3629,6 +3634,17 @@ function analyze(jsonContent) {
       const pos = extractPosition(sd);
       if (pos) nodePos.set(id, { x: pos.x, y: pos.y });
     }
+  }
+
+  // Directed edges: StartEntity = output (sending), EndEntity = input (receiving). Only inputs can pull.
+  // Junction-to-junction: bidirectional. Building-connected segments: only startId -> endId.
+  for (let i = 0; i < railSegments.length; i++) {
+    const r = railSegments[i];
+    const w = r.length || 1;
+    const startIsJunction = junctionNodeIds.has(r.startId);
+    const endIsJunction = junctionNodeIds.has(r.endId);
+    addDirectedEdge(r.startId, r.endId, i, w);
+    if (startIsJunction && endIsJunction) addDirectedEdge(r.endId, r.startId, i, w);
   }
 
   for (let i = 0; i < railSegments.length; i++) {
@@ -3664,6 +3680,25 @@ function analyze(jsonContent) {
     requestData = getJsonItems(root, 'itemData/Mass/logisticsRequestSubsystemState/requestData');
   } catch (_) {
     try { requestData = getJsonItems(root, 'itemData/Mass/LogisticsRequestSubsystemState/requestData'); } catch (_) {}
+  }
+
+  // Per-building consumption (item/min) so we don't overcount when many requests serve same (requester, item)
+  function normReqId(id) { const s = String(id); const m = s.match(/\(ID=(\d+)\)/); return m ? m[1] : s; }
+  const consumptionByRequesterItem = new Map();
+  for (const p of buildingPositions) {
+    if (!p.producedItem || (p.producedPerMinute || 0) <= 0) continue;
+    const baseName = stripQuality(p.producedItem);
+    const recipe = recipeInputsForAnalysis[p.producedItem] || recipeInputsForAnalysis[baseName];
+    if (!recipe || !Array.isArray(recipe)) continue;
+    const itemDef = itemsByName.get(p.producedItem);
+    if (!itemDef || !itemDef.AmountProduced || itemDef.AmountProduced <= 0) continue;
+    const craftsPerMin = p.producedPerMinute / itemDef.AmountProduced;
+    const requesterKey = normReqId(p.entityId);
+    for (const inp of recipe) {
+      const key = requesterKey + '\t' + inp.itemName;
+      const cur = consumptionByRequesterItem.get(key) || 0;
+      consumptionByRequesterItem.set(key, cur + inp.amount * craftsPerMin);
+    }
   }
 
   function itemDisplayNameFromDataBase(itemDataBase) {
@@ -3709,7 +3744,8 @@ function analyze(jsonContent) {
     return { dist: dist.get(endId), railIndices };
   }
 
-  const requestSummaries = [];
+  // Collect one candidate request per (requesterId, itemName) with best path; cap rate at requester's consumption
+  const requestCandidates = [];
   for (const req of Object.values(requestData || {})) {
     if (!req || typeof req !== 'object') continue;
     const wanted = req.wantedItem || req.WantedItem;
@@ -3752,11 +3788,7 @@ function analyze(jsonContent) {
     const requestRate = packageSenderRate(Number.isFinite(bottleneck) ? bottleneck : PACKAGE_SENDER_DEFAULT_RAIL_RATE, requestedAmount);
     if (requestRate <= 0) continue;
 
-    for (const ri of best.path.railIndices) {
-      railSegments[ri].load += requestRate;
-      railSegments[ri].requests += 1;
-    }
-    requestSummaries.push({
+    requestCandidates.push({
       requesterId: String(requesterId),
       requesterName: entityIdToName.get(String(requesterId)) || ('(ID=' + requesterId + ')'),
       itemName,
@@ -3765,6 +3797,39 @@ function analyze(jsonContent) {
       supplierId: best.supplier.entityId,
       supplierName: entityIdToName.get(String(best.supplier.entityId)) || ('(ID=' + best.supplier.entityId + ')'),
       railIndices: best.path.railIndices
+    });
+  }
+
+  // Group by (requesterId, itemName); keep only best path per group and cap total rate at consumption
+  const groupKey = r => normReqId(r.requesterId) + '\t' + r.itemName;
+  const groups = new Map();
+  for (const r of requestCandidates) {
+    const key = groupKey(r);
+    const cap = consumptionByRequesterItem.get(key);
+    if (!groups.has(key)) {
+      groups.set(key, { requests: [], cap: cap != null && cap > 0 ? cap : Infinity });
+    }
+    groups.get(key).requests.push(r);
+  }
+  const requestSummaries = [];
+  for (const [, g] of groups) {
+    const best = g.requests.reduce((a, b) => (!a || (b.railIndices.length < a.railIndices.length)) ? b : a);
+    const totalRaw = g.requests.reduce((s, r) => s + r.requestRate, 0);
+    const requestRate = Math.min(totalRaw, g.cap);
+    if (requestRate <= 0) continue;
+    for (const ri of best.railIndices) {
+      railSegments[ri].load += requestRate;
+      railSegments[ri].requests += 1;
+    }
+    requestSummaries.push({
+      requesterId: best.requesterId,
+      requesterName: best.requesterName,
+      itemName: best.itemName,
+      requestedAmount: best.requestedAmount,
+      requestRate,
+      supplierId: best.supplierId,
+      supplierName: best.supplierName,
+      railIndices: best.railIndices
     });
   }
 
@@ -3812,6 +3877,7 @@ function analyze(jsonContent) {
     railCircuits.push({
       id: circuitIdx++,
       rails,
+      railIndices: comp.railIndices,
       junctions,
       senders: requests,
       nodeIds: comp.nodeIds,
@@ -4021,6 +4087,11 @@ function renderTabContent() {
   document.body.classList.toggle('map-tab-active', activeTab === 'map');
   const container = document.getElementById('tabContent');
   if (!container) return;
+  let mapLegendScrollTop = 0;
+  if (activeTab === 'map') {
+    const oldLegend = container.querySelector('.map-legend');
+    if (oldLegend) mapLegendScrollTop = oldLegend.scrollTop;
+  }
   container.innerHTML = '';
 
   if (activeTab === 'buildings') renderBuildingsTab(container);
@@ -4028,7 +4099,11 @@ function renderTabContent() {
   else if (activeTab === 'shortfalls') renderShortfallsTab(container);
   else if (activeTab === 'storage') renderStorageTab(container);
   else if (activeTab === 'inventory') renderInventoryTab(container);
-  else if (activeTab === 'map') renderMapTab(container);
+  else if (activeTab === 'map') {
+    renderMapTab(container);
+    const newLegend = container.querySelector('.map-legend');
+    if (newLegend) newLegend.scrollTop = mapLegendScrollTop;
+  }
   else if (activeTab === 'drones') renderDronesTab(container);
   else if (activeTab === 'json-editor') renderJsonEditorTab(container);
 }
@@ -5002,8 +5077,8 @@ function renderDronesTab(container) {
           'background:' + (isOver ? 'rgba(127,29,29,0.15)' : 'var(--dark-800)')
       });
       const titleRow = h('div', { style: 'display:flex;align-items:center;justify-content:space-between;margin-bottom:0.375rem' },
-        h('span', { style: 'font-weight:600;font-size:0.875rem;color:' + (isOver ? 'var(--red-300)' : 'var(--gray-200)') },
-          'Circuit ' + (circuit.id + 1)
+        h('span', { style: 'font-weight:600;font-size:0.875rem;color:' + (isOver ? 'var(--red-300)' : 'var(--gray-200)') + ';cursor:help', title: RAIL_DEMAND_TOOLTIP },
+          'T' + circuit.minTier + ' - ' + circuit.capacity + '/min' + (isOver ? ' - ' + overloadedCount + ' seg over' : '') + ' - ' + circuit.totalDemand
         ),
         h('span', {
           style: 'font-size:0.75rem;padding:0.125rem 0.5rem;border-radius:0.25rem;font-weight:600;' +
@@ -5018,7 +5093,7 @@ function renderDronesTab(container) {
         h('span', null, 'Rails: ', h('span', { style: 'color:var(--gray-200)' }, String(circuit.rails.length))),
         h('span', null, 'Min tier: ', h('span', { style: 'color:var(--gray-200)' }, 'T' + circuit.minTier)),
         h('span', null, 'Base cap: ', h('span', { style: 'color:var(--accent-green)' }, circuit.capacity + '/min')),
-        h('span', null, 'Demand: ', h('span', { style: 'color:' + (isOver ? 'var(--red-400)' : 'var(--gray-200)') }, circuit.totalDemand + '/min')),
+        h('span', null, 'Demand: ', h('span', { style: 'color:' + (isOver ? 'var(--red-400)' : 'var(--gray-200)') + ';cursor:help', title: RAIL_DEMAND_TOOLTIP }, circuit.totalDemand + '/min')),
         h('span', null, 'Requests: ', h('span', { style: 'color:var(--gray-200)' }, String(circuit.senders.length))),
         h('span', null, 'Overloaded segs: ', h('span', { style: 'color:' + (isOver ? 'var(--red-400)' : 'var(--gray-200)') }, String(overloadedCount)))
       );
@@ -5265,25 +5340,31 @@ function renderMapTab(container) {
   const railCircuits = analysisData.railCircuits || [];
   const railsGrp = document.createElementNS(svgNs, 'g');
   railsGrp.id = 'mapRailCircuits';
+  const highlightPath = mapHighlightedPathRailIndices != null ? mapHighlightedPathRailIndices : new Set();
   try {
     for (const circuit of railCircuits) {
+      if (mapCircuitVisibility[circuit.id] === false) continue;
       const baseColor = CIRCUIT_COLORS[circuit.id % CIRCUIT_COLORS.length];
-      for (const rail of circuit.rails) {
-        if (!rail.startPos || !rail.endPos) continue;
+      const indices = circuit.railIndices || [];
+      circuit.rails.forEach((rail, j) => {
+        if (!rail.startPos || !rail.endPos) return;
         const s = worldToMapCoords(rail.startPos.x, rail.startPos.y);
         const e = worldToMapCoords(rail.endPos.x, rail.endPos.y);
         const line = document.createElementNS(svgNs, 'line');
         line.setAttribute('x1', s.x); line.setAttribute('y1', s.y);
         line.setAttribute('x2', e.x); line.setAttribute('y2', e.y);
+        const globalIdx = indices[j];
+        if (globalIdx != null) line.setAttribute('data-rail-idx', String(globalIdx));
+        const isInPath = globalIdx != null && highlightPath.has(globalIdx);
         const isOverloaded = !!rail.overloaded;
-        line.setAttribute('stroke', isOverloaded ? '#ef4444' : baseColor);
-        line.setAttribute('stroke-width', '2');
-        line.setAttribute('stroke-opacity', isOverloaded ? '0.95' : '0.55');
+        line.setAttribute('stroke', isInPath ? '#fbbf24' : (isOverloaded ? '#ef4444' : baseColor));
+        line.setAttribute('stroke-width', isInPath ? '4' : '2');
+        line.setAttribute('stroke-opacity', isInPath ? '1' : (isOverloaded ? '0.95' : '0.55'));
         line.setAttribute('stroke-linecap', 'round');
         if (isOverloaded) line.setAttribute('data-overloaded', '1');
         line.setAttribute('data-circuit', String(circuit.id));
         railsGrp.appendChild(line);
-      }
+      });
     }
   } catch (e) { console.error('Rail circuit overlay error:', e); }
   railsGrp.style.display = mapViewMode === 'production' ? 'none' : '';
@@ -5327,10 +5408,34 @@ function renderMapTab(container) {
     rect.setAttribute('data-name', p.name);
     rect.setAttribute('data-category', p.category);
     if (p.areaId != null) rect.setAttribute('data-area-id', String(p.areaId));
+    if (p.entityId != null) rect.setAttribute('data-entity-id', String(p.entityId));
     rect.style.cursor = 'pointer';
     buildingRectsGrp.appendChild(rect);
   });
   g.appendChild(buildingRectsGrp);
+
+  function normalizeEntityIdForPath(id) {
+    if (id == null) return '';
+    const s = String(id);
+    const m = s.match(/\(ID=(\d+)\)/);
+    return m ? m[1] : s;
+  }
+  function railIndicesForBuilding(entityId) {
+    const normalized = normalizeEntityIdForPath(entityId);
+    if (!normalized) return new Set();
+    const out = new Set();
+    for (const circuit of railCircuits) {
+      if (!circuit.senders) continue;
+      for (const req of circuit.senders) {
+        const reqNorm = normalizeEntityIdForPath(req.requesterId);
+        const supNorm = normalizeEntityIdForPath(req.supplierId);
+        if (reqNorm === normalized || supNorm === normalized) {
+          (req.railIndices || []).forEach(ri => out.add(ri));
+        }
+      }
+    }
+    return out;
+  }
 
   const productionByArea = analysisData.productionByArea || [];
   productionByArea.forEach(a => {
@@ -5390,7 +5495,7 @@ function renderMapTab(container) {
   const hoverLabelCat = hoverLabel.querySelector('.map-hover-label-cat');
   const hoverLabelProduces = hoverLabel.querySelector('.map-hover-label-produces');
   const labelOffset = 12;
-  function showHoverLabel(name, category, clientX, clientY, displayName, producedItem) {
+  function showHoverLabel(name, category, clientX, clientY, displayName, producedItem, producedPerMinute) {
     // Line 1: always show building type (name)
     hoverLabelName.textContent = name;
     // Line 2: category; if user set a custom name, show it here too
@@ -5398,7 +5503,10 @@ function renderMapTab(container) {
       ? `${category} · "${displayName}"`
       : category;
     if (producedItem) {
-      hoverLabelProduces.textContent = `Producing: ${producedItem}`;
+      const rateStr = (producedPerMinute != null && producedPerMinute > 0)
+        ? ` (${Number(producedPerMinute) === producedPerMinute && producedPerMinute % 1 === 0 ? producedPerMinute : producedPerMinute.toFixed(1)}/min)`
+        : '';
+      hoverLabelProduces.textContent = `Producing: ${producedItem}${rateStr}`;
       hoverLabelProduces.style.display = '';
     } else {
       hoverLabelProduces.style.display = 'none';
@@ -5424,12 +5532,26 @@ function renderMapTab(container) {
     const rect = buildingRectsGrp.children[i];
     if (!rect) return;
     rect.addEventListener('mouseenter', (e) => {
-      showHoverLabel(p.name, p.category, e.clientX, e.clientY, p.displayName, p.producedItem);
+      showHoverLabel(p.name, p.category, e.clientX, e.clientY, p.displayName, p.producedItem, p.producedPerMinute);
     });
     rect.addEventListener('mousemove', (e) => {
       positionHoverLabel(e.clientX, e.clientY);
     });
     rect.addEventListener('mouseleave', hideHoverLabel);
+    rect.addEventListener('mousedown', (e) => e.stopPropagation());
+    rect.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const entityId = rect.getAttribute('data-entity-id');
+      const pathIndices = entityId ? railIndicesForBuilding(entityId) : new Set();
+      if (pathIndices.size > 0) {
+        const sameSelection = mapHighlightedPathRailIndices && pathIndices.size === mapHighlightedPathRailIndices.size &&
+          [...pathIndices].every(ri => mapHighlightedPathRailIndices.has(ri));
+        mapHighlightedPathRailIndices = sameSelection ? null : pathIndices;
+      } else {
+        mapHighlightedPathRailIndices = null;
+      }
+      renderTabContent();
+    });
   });
   const areaById = new Map(productionByArea.map(a => [String(a.id), a]));
   for (let i = 0; i < areaMarkersGrp.children.length; i++) {
@@ -5645,7 +5767,7 @@ function renderMapTab(container) {
   try {
   if (railCircuits.length > 0) {
     const rcCatDiv = document.createElement('div');
-    rcCatDiv.className = 'map-legend-cat map-legend-cat-collapsible collapsed';
+    rcCatDiv.className = 'map-legend-cat map-legend-cat-collapsible';
     const rcHead = document.createElement('div');
     rcHead.className = 'map-legend-cat-head';
     rcHead.style.cursor = 'pointer';
@@ -5653,32 +5775,90 @@ function renderMapTab(container) {
     rcChevron.className = 'map-legend-cat-chevron';
     rcChevron.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 10l5 5 5-5"/></svg>';
     rcChevron.addEventListener('click', (e) => { e.stopPropagation(); rcCatDiv.classList.toggle('collapsed'); });
+    const rcCatCheckbox = document.createElement('input');
+    rcCatCheckbox.type = 'checkbox';
+    rcCatCheckbox.checked = railCircuits.every(c => mapCircuitVisibility[c.id] !== false);
+    rcCatCheckbox.indeterminate = railCircuits.some(c => mapCircuitVisibility[c.id]) && !rcCatCheckbox.checked;
+    rcCatCheckbox.addEventListener('change', (e) => {
+      e.stopPropagation();
+      const on = rcCatCheckbox.checked;
+      railCircuits.forEach(c => { mapCircuitVisibility[c.id] = on; });
+      renderTabContent();
+    });
+    rcCatCheckbox.addEventListener('click', (e) => e.stopPropagation());
     const overCount = railCircuits.reduce((s, c) => s + ((c.overloadedSegments || []).length > 0 ? 1 : 0), 0);
     const rcTitle = document.createElement('span');
     rcTitle.className = 'map-legend-cat-title';
     rcTitle.style.marginBottom = '0';
     rcTitle.innerHTML = 'Rail circuits (' + railCircuits.length + ')' + (overCount > 0 ? ' <span style="color:var(--red-400)">' + overCount + ' over</span>' : '');
     rcHead.appendChild(rcChevron);
+    rcHead.appendChild(rcCatCheckbox);
     rcHead.appendChild(rcTitle);
-    rcHead.addEventListener('click', () => rcCatDiv.classList.toggle('collapsed'));
+    rcHead.addEventListener('click', (e) => { if (!rcCatCheckbox.contains(e.target)) rcCatDiv.classList.toggle('collapsed'); });
     rcCatDiv.appendChild(rcHead);
     const rcBody = document.createElement('div');
     rcBody.className = 'map-legend-cat-body';
     for (const circuit of railCircuits) {
+      if (mapCircuitVisibility[circuit.id] === undefined) mapCircuitVisibility[circuit.id] = true;
       const overloadedCount = (circuit.overloadedSegments || []).length;
       const isOver = overloadedCount > 0;
       const color = CIRCUIT_COLORS[circuit.id % CIRCUIT_COLORS.length];
       const row = document.createElement('div');
-      row.className = 'map-legend-item';
+      row.className = 'map-legend-item map-legend-item-toggle';
       row.style.fontSize = '0.7rem';
+      row.style.cursor = 'pointer';
+      row.title = 'Checkbox: show/hide. Click label: pan to circuit';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = mapCircuitVisibility[circuit.id] !== false;
+      checkbox.addEventListener('change', (e) => {
+        e.stopPropagation();
+        mapCircuitVisibility[circuit.id] = checkbox.checked;
+        renderTabContent();
+      });
+      checkbox.addEventListener('click', (e) => e.stopPropagation());
       const dot = document.createElement('span');
       dot.className = 'map-legend-dot';
       dot.style.background = color;
       const lbl = document.createElement('span');
       lbl.style.color = isOver ? 'var(--red-300)' : 'var(--gray-400)';
-      lbl.textContent = 'Circuit ' + (circuit.id + 1) + ' (T' + circuit.minTier + ', ' + circuit.totalDemand + '/' + circuit.capacity + '/min' + (isOver ? ', ' + overloadedCount + ' seg over' : '') + ')';
+      lbl.style.cursor = 'pointer';
+      lbl.title = RAIL_DEMAND_TOOLTIP;
+      lbl.textContent = 'T' + circuit.minTier + ' - ' + circuit.capacity + '/min' + (isOver ? ' - ' + overloadedCount + ' seg over' : '') + ' - ' + circuit.totalDemand;
+      row.appendChild(checkbox);
       row.appendChild(dot);
       row.appendChild(lbl);
+      lbl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const rails = circuit.rails || [];
+        if (rails.length === 0) return;
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const rail of rails) {
+          if (rail.startPos) {
+            const s = worldToMapCoords(rail.startPos.x, rail.startPos.y);
+            minX = Math.min(minX, s.x); minY = Math.min(minY, s.y);
+            maxX = Math.max(maxX, s.x); maxY = Math.max(maxY, s.y);
+          }
+          if (rail.endPos) {
+            const ep = worldToMapCoords(rail.endPos.x, rail.endPos.y);
+            minX = Math.min(minX, ep.x); minY = Math.min(minY, ep.y);
+            maxX = Math.max(maxX, ep.x); maxY = Math.max(maxY, ep.y);
+          }
+        }
+        if (minX === Infinity) return;
+        const pad = 0.15;
+        const w = Math.max(maxX - minX, 1);
+        const h = Math.max(maxY - minY, 1);
+        const totalW = w * (1 + 2 * pad);
+        const totalH = h * (1 + 2 * pad);
+        const fitScale = Math.min(vbW / totalW, vbH / totalH);
+        mapScale = Math.max(0.2, Math.min(20, fitScale));
+        const cx = (minX + maxX) / 2;
+        const cy = (minY + maxY) / 2;
+        mapTranslateX = viewCenterX - cx * mapScale;
+        mapTranslateY = viewCenterY - cy * mapScale;
+        renderTabContent();
+      });
       rcBody.appendChild(row);
     }
     rcCatDiv.appendChild(rcBody);
@@ -5937,6 +6117,8 @@ function showAnalysis(data, filename) {
   activeSaveName = filename;
   activeTab = 'buildings';
   mapBuildingVisibility = {};
+  mapCircuitVisibility = {};
+  mapHighlightedPathRailIndices = null;
 
   $('#activeSaveLabel').textContent = '\u2014 ' + filename;
   $('#activeSaveLabel').classList.remove('hidden');
